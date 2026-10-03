@@ -10,6 +10,8 @@ import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
+import { MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
+import { Icon, IconText } from '@/components/common/Icon';
 
 // Lịch sử = ticket đã kết thúc (flow mới: closed hoặc cancelled).
 const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
@@ -19,9 +21,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   cancelled: { label: 'Đã hủy',   color: Colors.textMuted, bg: Colors.divider },
 };
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  electrical: '⚡', plumbing: '🚰', furniture: '🪑', appliance: '📺', other: '🔧',
-};
 
 export const MaintenanceHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -99,7 +98,11 @@ export const MaintenanceHistoryScreen: React.FC = () => {
       >
         <View style={styles.cardTop}>
           <View style={[styles.categoryBadge, { backgroundColor: Colors.primaryBg }]}>
-            <Text style={{ fontSize: 20 }}>{(item.category && CATEGORY_EMOJI[item.category]) || '🔧'}</Text>
+            <Icon
+              name={(item.category && MAINTENANCE_CATEGORY_ICON[item.category]) || 'wrench'}
+              size={20}
+              color={Colors.primary}
+            />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
@@ -113,25 +116,25 @@ export const MaintenanceHistoryScreen: React.FC = () => {
         </View>
 
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>
-            📅 Tạo: {formatDate(item.createdAt)}
-          </Text>
+          <IconText icon="calendar" gap={4} style={styles.metaText}>
+            Tạo: {formatDate(item.createdAt)}
+          </IconText>
           {(item.resolvedAt || resolvedEntry?.updatedAt) && (
-            <Text style={styles.metaText}>
-              ✅ {item.status === 'closed' ? 'Hoàn tất' : 'Hủy'}: {formatDate((item.resolvedAt ?? resolvedEntry?.updatedAt ?? '').slice(0, 10))}
-            </Text>
+            <IconText icon={item.status === 'closed' ? 'success' : 'ban'} gap={4} style={styles.metaText}>
+              {item.status === 'closed' ? 'Hoàn tất' : 'Hủy'}: {formatDate((item.resolvedAt ?? resolvedEntry?.updatedAt ?? '').slice(0, 10))}
+            </IconText>
           )}
         </View>
 
         {item.assignedTo && (
-          <Text style={styles.assignedText}>👷 {item.assignedTo}</Text>
+          <IconText icon="user" gap={4} style={styles.assignedText}>{item.assignedTo}</IconText>
         )}
 
         {resolvedEntry?.note && (
           <Text style={styles.noteText}>"{resolvedEntry.note}"</Text>
         )}
         <View style={styles.detailFooter}>
-          <Text style={styles.detailLink}>Xem chi tiết →</Text>
+          <IconText icon="chevron-right" trailing gap={2} style={styles.detailLink}>Xem chi tiết</IconText>
         </View>
       </TouchableOpacity>
     );
@@ -141,7 +144,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>←</Text>
+          <Icon name="back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>Lịch sử bảo trì</Text>
@@ -161,8 +164,8 @@ export const MaintenanceHistoryScreen: React.FC = () => {
           <View style={styles.chipsRow}>
             {([
               ['all', `Tất cả ${allHistory.length}`],
-              ['closed', `✅ Hoàn tất ${statusCounts.closed ?? 0}`],
-              ['cancelled', `✕ Đã hủy ${statusCounts.cancelled ?? 0}`],
+              ['closed', `Hoàn tất ${statusCounts.closed ?? 0}`],
+              ['cancelled', `Đã hủy ${statusCounts.cancelled ?? 0}`],
             ] as const).map(([k, label]) => (
               <TouchableOpacity
                 key={k}
@@ -193,7 +196,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
             </View>
           ) : loadError ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Icon name="alert" size={44} color={Colors.warning} strokeWidth={1.5} style={styles.emptyIcon} />
               <Text style={styles.emptyTitle}>Không tải được lịch sử</Text>
               <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
                 <Text style={styles.retryBtnText}>Thử lại</Text>
@@ -201,7 +204,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
             </View>
           ) : hasActiveFilter ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>🔍</Text>
+              <Icon name="search" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
               <Text style={styles.emptyTitle}>Không tìm thấy yêu cầu phù hợp</Text>
               <TouchableOpacity style={styles.retryBtn} onPress={clearFilters}>
                 <Text style={styles.retryBtnText}>Bỏ lọc</Text>
@@ -209,7 +212,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
             </View>
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>🔧</Text>
+              <Icon name="wrench" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
               <Text style={styles.emptyTitle}>Chưa có lịch sử</Text>
               <Text style={styles.emptyDesc}>Các yêu cầu đã nghiệm thu, hoàn tất hoặc hủy sẽ hiển thị ở đây.</Text>
             </View>
@@ -231,7 +234,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center',
     ...Shadow.sm,
   },
-  backBtnText: { fontSize: 20, color: Colors.textPrimary, lineHeight: 24 },
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
 
@@ -278,7 +280,7 @@ const styles = StyleSheet.create({
   detailLink: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 
   empty: { paddingTop: 80, alignItems: 'center' },
-  emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },
+  emptyIcon: { marginBottom: Spacing.base },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center' },
   retryBtn: {

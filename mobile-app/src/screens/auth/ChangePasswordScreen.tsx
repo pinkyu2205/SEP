@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius } from '@/constants';
-import { Button, Input } from '@/components/common';
+import { Button, Input, Icon } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { useNavigation } from '@react-navigation/native';
 import { realAuthService } from '@/services/auth/realAuthService';
@@ -53,7 +53,9 @@ export const ChangePasswordScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.emoji}>🔒</Text>
+          <View style={styles.heroIcon}>
+            <Icon name="lock" size={32} color={Colors.primary} />
+          </View>
           <Text style={styles.title}>Đổi mật khẩu</Text>
           <Text style={styles.subtitle}>
             Xin chào <Text style={{fontWeight: 'bold', color: Colors.primary}}>{user?.fullName}</Text>, đây là lần đầu bạn đăng nhập. 
@@ -100,7 +102,10 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.white },
   container: { flex: 1, justifyContent: 'center', padding: Spacing.xl },
   header: { alignItems: 'center', marginBottom: Spacing['2xl'] },
-  emoji: { fontSize: 64, marginBottom: Spacing.md },
+  heroIcon: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.primaryBg,
+    alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+  },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
   subtitle: { fontSize: 15, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: Spacing.md },
   form: { width: '100%' },

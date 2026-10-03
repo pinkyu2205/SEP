@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, Modal, StyleSheet, ScrollView,
 } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon } from './Icon';
 import { serverNow } from '@/utils/serverTime';
 
 interface Props {
@@ -167,7 +168,7 @@ export const DatePickerField: React.FC<Props> = ({
         <Text style={value ? styles.fieldVal : styles.fieldPlaceholder}>
           {value || placeholder}
         </Text>
-        <Text style={styles.calIcon}>📅</Text>
+        <Icon name="calendar" size={18} color={Colors.textMuted} />
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade">
@@ -176,14 +177,14 @@ export const DatePickerField: React.FC<Props> = ({
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.navBtn} onPress={goPrev}>
-              <Text style={styles.navBtnText}>‹</Text>
+              <Icon name="chevron-left" size={20} color={Colors.textPrimary} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerLabelBtn} onPress={cycleMode} activeOpacity={0.7}>
               <Text style={styles.monthLabel}>{headerLabel}</Text>
-              <Text style={styles.headerCaret}>{mode === 'days' ? '▾' : '▴'}</Text>
+              <Icon name={mode === 'days' ? 'chevron-down' : 'chevron-up'} size={16} color={Colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.navBtn} onPress={goNext}>
-              <Text style={styles.navBtnText}>›</Text>
+              <Icon name="chevron-right" size={20} color={Colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -328,7 +329,7 @@ const styles = StyleSheet.create({
   },
   fieldVal: { fontSize: 14, color: '#111827', fontWeight: '500', flex: 1 },
   fieldPlaceholder: { fontSize: 14, color: '#9CA3AF', flex: 1 },
-  calIcon: { fontSize: 16 },
+
 
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: {
@@ -339,10 +340,10 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md },
   navBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#F3F4F6' },
-  navBtnText: { fontSize: 22, color: Colors.textPrimary, fontWeight: '600', lineHeight: 28 },
+
   headerLabelBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.md, backgroundColor: '#F3F4F6' },
   monthLabel: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary },
-  headerCaret: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
+
 
   pickerScroll: { maxHeight: 260 },
   pickerGrid: { flexDirection: 'row', flexWrap: 'wrap' },

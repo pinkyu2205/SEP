@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants';
+import { Icon, IconText } from '@/components/common/Icon';
 import { showAlert } from '@/utils';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { tenantInvoiceDisputeService } from '@/services/tenant/invoiceDisputeService';
@@ -148,7 +149,7 @@ export const InvoiceDisputeModal: React.FC<Props> = ({
                   onPress={() => setReason(r.code)}
                   activeOpacity={0.8}
                 >
-                  <Text style={s.reasonIcon}>{r.icon}</Text>
+                  <Icon name={r.icon} size={20} color={active ? Colors.primary : Colors.textSecondary} />
                   <View style={{ flex: 1 }}>
                     <Text style={[s.reasonLabel, active && { color: Colors.primary }]}>
                       {r.label}
@@ -194,7 +195,7 @@ export const InvoiceDisputeModal: React.FC<Props> = ({
                 <View key={url} style={s.thumbWrap}>
                   <Image source={{ uri: url }} style={s.thumb} />
                   <TouchableOpacity style={s.thumbX} onPress={() => removePhoto(url)}>
-                    <Text style={s.thumbXText}>×</Text>
+                    <Icon name="close" size={12} color={Colors.white} strokeWidth={3} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -214,11 +215,11 @@ export const InvoiceDisputeModal: React.FC<Props> = ({
 
             {/* Hệ quả — đặt sát nút gửi, đây là thứ khách phân vân nhất. */}
             <View style={s.effectBox}>
-              <Text style={s.effectText}>
-                ℹ️ Trong lúc tra soát, hoá đơn này <Text style={s.effectStrong}>tạm ngừng
+              <IconText icon="info" multiline style={s.effectText}>
+                Trong lúc tra soát, hoá đơn này <Text style={s.effectStrong}>tạm ngừng
                 tính quá hạn</Text> và không bị phạt trễ. Nếu yêu cầu không có căn cứ,
                 hạn thanh toán sẽ chạy lại và bạn được cộng thêm vài ngày để trả.
-              </Text>
+              </IconText>
             </View>
           </ScrollView>
 
@@ -268,7 +269,7 @@ const s = StyleSheet.create({
     padding: Spacing.sm, marginBottom: Spacing.sm,
   },
   reasonBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  reasonIcon: { fontSize: 18 },
+
   reasonLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   reasonHint: { fontSize: 12, color: Colors.textMuted, marginTop: 2, lineHeight: 17 },
   radio: {
@@ -293,7 +294,6 @@ const s = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.error,
     alignItems: 'center', justifyContent: 'center',
   },
-  thumbXText: { color: Colors.white, fontSize: 15, fontWeight: '800', lineHeight: 18 },
   addPhoto: {
     width: 72, height: 72, borderRadius: BorderRadius.md,
     borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.primary,

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { showAlert, formatDate } from '@/utils';
+import { Icon, IconText } from '@/components/common/Icon';
 import {
   extensionService, EXTENSION_STATUS_META,
   type ExtensionRequest, type ExtensionRequestStatus,
@@ -82,7 +83,7 @@ export const ExtensionRequestsScreen: React.FC = () => {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>
           Đơn xin gia hạn{rows.length > 0 ? ` (${rows.length})` : ''}
@@ -123,13 +124,13 @@ export const ExtensionRequestsScreen: React.FC = () => {
         >
           {loadError ? (
             <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>⚠️</Text>
+              <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} />
               <Text style={s.emptyTitle}>Không tải được danh sách</Text>
               <Text style={s.emptyText}>Kéo xuống để thử lại.</Text>
             </View>
           ) : rows.length === 0 ? (
             <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>📄</Text>
+              <Icon name="document" size={40} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={s.emptyTitle}>Không có đơn nào</Text>
               <Text style={s.emptyText}>
                 {tab === 'PENDING'
@@ -222,9 +223,9 @@ export const ExtensionRequestsScreen: React.FC = () => {
                       style={s.noteBtn}
                       onPress={() => { setNoteFor(r.id); setNoteText(r.managerNote ?? ''); }}
                     >
-                      <Text style={s.noteBtnText}>
-                        {r.managerNote ? 'Sửa ý kiến' : '✍️ Ghi ý kiến cho quản trị viên'}
-                      </Text>
+                      <IconText icon="edit" style={s.noteBtnText}>
+                        {r.managerNote ? 'Sửa ý kiến' : 'Ghi ý kiến cho quản trị viên'}
+                      </IconText>
                     </TouchableOpacity>
                   )
                 )}
@@ -246,7 +247,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { fontSize: 22, color: Colors.primary },
+
   headerTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
 
   roleBar: {
@@ -318,7 +319,7 @@ const s = StyleSheet.create({
   noteBtnText: { color: Colors.primary, fontSize: 13.5, fontWeight: '700' },
 
   emptyBox: { alignItems: 'center', paddingVertical: 60, gap: Spacing.xs },
-  emptyIcon: { fontSize: 40 },
+
   emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

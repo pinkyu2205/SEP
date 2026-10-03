@@ -17,6 +17,7 @@ import { managerDepositService, ManagerDeposit } from '@/services/manager/deposi
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -39,21 +40,21 @@ import { serverNow, todayIso } from '@/utils/serverTime';
 type Filter = 'DEBT' | 'all' | 'DEPOSIT';
 
 
-const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
-  QR:            { label: 'QR VietQR',    icon: '📱' },
-  PAYOS:         { label: 'PayOS',        icon: '📱' },
-  BANK_TRANSFER: { label: 'Chuyển khoản', icon: '🏦' },
-  CASH:          { label: 'Tiền mặt',     icon: '💵' },
-  EWALLET:       { label: 'Ví điện tử',   icon: '👛' },
-  OTHER:         { label: 'Khác',         icon: '💳' },
+const METHOD_CONFIG: Record<string, { label: string; icon: IconName }> = {
+  QR:            { label: 'QR VietQR',    icon: 'qr' },
+  PAYOS:         { label: 'PayOS',        icon: 'qr' },
+  BANK_TRANSFER: { label: 'Chuyển khoản', icon: 'bank' },
+  CASH:          { label: 'Tiền mặt',     icon: 'cash' },
+  EWALLET:       { label: 'Ví điện tử',   icon: 'wallet' },
+  OTHER:         { label: 'Khác',         icon: 'card' },
 };
 const methodOf = (m?: string) => METHOD_CONFIG[(m || '').toUpperCase()] ?? METHOD_CONFIG.OTHER;
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  VERIFIED:       { label: '✓ Đã xác nhận', color: Colors.success,   bg: Colors.successLight },
+  VERIFIED:       { label: 'Đã xác nhận',   color: Colors.success,   bg: Colors.successLight },
   PENDING_VERIFY: { label: 'Chờ xác nhận',  color: Colors.warning,   bg: Colors.warningLight },
   REJECTED:       { label: 'Bị từ chối',    color: Colors.error,     bg: Colors.errorLight },
-  PAID:           { label: '✓ Đã thu cọc',  color: Colors.success,   bg: Colors.successLight },
+  PAID:           { label: 'Đã thu cọc',    color: Colors.success,   bg: Colors.successLight },
   PENDING:        { label: 'Chưa thu cọc',  color: Colors.warning,   bg: Colors.warningLight },
   FAILED:         { label: 'Thu thất bại',  color: Colors.error,     bg: Colors.errorLight },
   CANCELLED:      { label: 'Đã huỷ',        color: Colors.textMuted, bg: Colors.background },
@@ -276,14 +277,14 @@ const fromDeposit = (d: ManagerDeposit): Entry => ({
 });
 
 /** Icon + nhãn ngắn theo loại khoản — thứ manager quét mắt tìm trước tiên. */
-const KIND_SHORT: Record<InvoiceKind, { icon: string; label: string }> = {
-  ONBOARD: { icon: '🤝', label: 'Thu lúc đón khách' },
-  RENT: { icon: '🏠', label: 'Tiền nhà' },
-  ELECTRICITY: { icon: '⚡', label: 'Tiền điện' },
-  WATER: { icon: '💧', label: 'Tiền nước' },
-  SERVICE: { icon: '🧾', label: 'Dịch vụ' },
-  MAINTENANCE: { icon: '🔧', label: 'Phí sửa chữa' },
-  UNKNOWN: { icon: '📄', label: 'Khoản khác' },
+const KIND_SHORT: Record<InvoiceKind, { icon: IconName; label: string }> = {
+  ONBOARD: { icon: 'key', label: 'Thu lúc đón khách' },
+  RENT: { icon: 'home', label: 'Tiền nhà' },
+  ELECTRICITY: { icon: 'electric', label: 'Tiền điện' },
+  WATER: { icon: 'water', label: 'Tiền nước' },
+  SERVICE: { icon: 'receipt', label: 'Dịch vụ' },
+  MAINTENANCE: { icon: 'wrench', label: 'Phí sửa chữa' },
+  UNKNOWN: { icon: 'document', label: 'Khoản khác' },
 };
 
 /**
@@ -300,7 +301,9 @@ const TxnRow: React.FC<{
   const up = (entry.status || '').toUpperCase();
   const isDeposit = entry.kind === 'DEPOSIT';
   const hidden = isDeposit || isAmountHidden(entry.invoiceKind);
-  const kind = isDeposit ? { icon: '🔐', label: 'Tiền cọc' } : KIND_SHORT[entry.invoiceKind];
+  const kind: { icon: IconName; label: string } = isDeposit
+    ? { icon: 'deposit', label: 'Tiền cọc' }
+    : KIND_SHORT[entry.invoiceKind];
   const normal = up === 'VERIFIED' || up === 'PAID';
   const st = statusOf(entry.status);
   const when = entry.at
@@ -310,7 +313,7 @@ const TxnRow: React.FC<{
   return (
     <TouchableOpacity style={s.row} activeOpacity={0.7} onPress={() => onPress(entry)}>
       <View style={s.rowIcon}>
-        <Text style={{ fontSize: 17 }}>{kind.icon}</Text>
+        <Icon name={kind.icon} size={17} color={Colors.textSecondary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={s.rowName} numberOfLines={1}>
@@ -368,7 +371,7 @@ const TenantGroupRow: React.FC<{ group: Entry; onPress: (e: Entry) => void }> = 
         const st = statusOf(c.status);
         return (
           <TouchableOpacity key={c.key} style={s.tgLine} activeOpacity={0.7} onPress={() => onPress(c)}>
-            <Text style={s.tgIcon}>{kind.icon}</Text>
+            <Icon name={kind.icon} size={15} color={Colors.textSecondary} style={s.tgIcon} />
             <View style={{ flex: 1 }}>
               <Text style={s.tgLabel} numberOfLines={1}>{kind.label}</Text>
               <Text style={s.tgMeta} numberOfLines={1}>
@@ -382,7 +385,7 @@ const TenantGroupRow: React.FC<{ group: Entry; onPress: (e: Entry) => void }> = 
             ) : !hidden ? (
               <Text style={s.tgAmount}>{formatCurrency(c.amount ?? 0)}</Text>
             ) : null}
-            <Text style={s.tgChevron}>›</Text>
+            <Icon name="chevron-right" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
         );
       })}
@@ -707,16 +710,17 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
             children: list,
           }));
         }
-        // Tóm tắt theo loại: "🏠 4 · 🤝 3 · 🔧 2" — nhìn tiêu đề là biết tháng đó thu những gì.
+        // Tóm tắt theo loại: icon loại khoản kèm số lượng — nhìn tiêu đề là biết tháng đó thu những gì.
         const byKind = new Map<InvoiceKind, number>();
         for (const e of sorted) byKind.set(e.invoiceKind, (byKind.get(e.invoiceKind) ?? 0) + 1);
-        const kinds = [...byKind.entries()].map(([k, n]) => `${KIND_SHORT[k].icon} ${n}`).join('  ');
+        const kinds = [...byKind.entries()].map(([k, n]) => ({ kind: k, icon: KIND_SHORT[k].icon, n }));
         return {
           key,
           title: m ? `Tháng ${Number(m)}/${y}` : 'Không rõ thời gian',
           sub: filter === 'all'
-            ? `${tenants} khách · ${data.length} khoản  ·  ${kinds}`
+            ? `${tenants} khách · ${data.length} khoản`
             : `${data.length} giao dịch`,
+          kinds: filter === 'all' ? kinds : [],
           extra: visible > 0 ? `Điện nước & DV: ${formatCurrency(visible)}` : '',
           data: rows,
         };
@@ -753,7 +757,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
       {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={handleBack}>
-          <Text style={s.backBtnText}>‹</Text>
+          <Icon name="back" size={24} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Tiền khách thuê</Text>
@@ -785,7 +789,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
 
       {/* ── Tìm kiếm ── */}
       <View style={s.searchBox}>
-        <Text style={s.searchIcon}>🔍</Text>
+        <Icon name="search" size={15} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
           value={search}
@@ -797,7 +801,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={s.searchClear}>✕</Text>
+            <Icon name="close" size={15} color={Colors.textMuted} style={s.searchClear} />
           </TouchableOpacity>
         )}
       </View>
@@ -845,16 +849,16 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                       activeOpacity={0.7}
                       onPress={() => openTenantInvoices(d, line.firstId)}
                     >
-                      <Text style={s.debtLineText} numberOfLines={1}>
-                        {KIND_SHORT[line.kind].icon} {KIND_SHORT[line.kind].label} {line.periods}
-                      </Text>
+                      <IconText icon={KIND_SHORT[line.kind].icon} gap={5} style={s.debtLineText} numberOfLines={1}>
+                        {KIND_SHORT[line.kind].label} {line.periods}
+                      </IconText>
                       {line.amount != null && <Text style={s.debtLineAmount}>{formatCurrency(line.amount)}</Text>}
-                      <Text style={s.debtChevron}>›</Text>
+                      <Icon name="chevron-right" size={16} color={Colors.textMuted} />
                     </TouchableOpacity>
                   ))}
                   {d.canTerminate && (
                     <View style={s.debtTerminateBox}>
-                      <Text style={s.debtTerminate}>⛔ Nợ quá hạn — được quyền chấm dứt hợp đồng</Text>
+                      <IconText icon="ban" multiline gap={5} style={s.debtTerminate}>Nợ quá hạn — được quyền chấm dứt hợp đồng</IconText>
                       <TouchableOpacity
                         style={[s.debtTerminateBtn, terminatingKey === d.key && { opacity: 0.5 }]}
                         disabled={terminatingKey === d.key}
@@ -869,7 +873,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
               ))}
             {debtors.length === 0 && (
               <View style={s.emptyBox}>
-                <Text style={s.emptyEmoji}>✅</Text>
+                <Icon name="success" size={36} color={Colors.success} strokeWidth={1.5} style={s.emptyIcon} />
                 <Text style={s.emptyText}>Không có khách nào đang nợ.</Text>
               </View>
             )}
@@ -899,12 +903,17 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
               >
                 <View style={{ flex: 1 }}>
                   <Text style={s.groupTitle}>{section.title}</Text>
-                  <Text style={s.groupSub} numberOfLines={1}>{section.sub}</Text>
+                  <View style={s.groupSubRow}>
+                    <Text style={s.groupSub} numberOfLines={1}>{section.sub}</Text>
+                    {((section as { kinds?: { kind: InvoiceKind; icon: IconName; n: number }[] }).kinds ?? []).map(k => (
+                      <IconText key={k.kind} icon={k.icon} gap={2} iconSize={12} style={s.groupSub}>{k.n}</IconText>
+                    ))}
+                  </View>
                   {!!(section as { extra?: string }).extra && (
                     <Text style={s.groupExtra}>{(section as { extra?: string }).extra}</Text>
                   )}
                 </View>
-                {collapsible && <Text style={s.groupChevron}>{open ? '⌃' : '⌄'}</Text>}
+                {collapsible && <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textMuted} />}
               </TouchableOpacity>
             );
           }}
@@ -919,7 +928,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           renderSectionFooter={({ section }) => (isOpen(section.key) ? <View style={s.groupFoot} /> : null)}
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyEmoji}>{search ? '🔍' : '💳'}</Text>
+              <Icon name={search ? 'search' : 'card'} size={36} color={Colors.textMuted} strokeWidth={1.5} style={s.emptyIcon} />
               <Text style={s.emptyText}>
                 {search
                   ? `Không tìm thấy giao dịch nào khớp "${search.trim()}".`
@@ -953,12 +962,12 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                       </Text>
                     </View>
                     <TouchableOpacity onPress={() => setSelected(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                      <Text style={s.modalClose}>✕</Text>
+                      <Icon name="close" size={18} color={Colors.textMuted} />
                     </TouchableOpacity>
                   </View>
 
                   <View style={[s.statusBanner, { backgroundColor: st.bg }]}>
-                    <Text style={{ fontSize: 20 }}>{isDeposit ? '🔐' : mc.icon}</Text>
+                    <Icon name={isDeposit ? 'deposit' : mc.icon} size={20} color={st.color} />
                     <Text style={[s.statusBannerText, { color: st.color }]}>{st.label}</Text>
                   </View>
 
@@ -1043,7 +1052,7 @@ const s = StyleSheet.create({
   },
   debtLineText: { flex: 1, fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
   debtLineAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
-  debtChevron: { fontSize: 18, color: Colors.textMuted },
+
   debtTerminateBox: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: 4,
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: 6, paddingLeft: Spacing.sm,
@@ -1059,9 +1068,10 @@ const s = StyleSheet.create({
     borderTopLeftRadius: BorderRadius.lg, borderTopRightRadius: BorderRadius.lg,
   },
   groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  groupSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  groupSubRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 8, marginTop: 2 },
+  groupSub: { fontSize: 12, color: Colors.textMuted },
   groupHeadClosed: { borderBottomWidth: 1, borderRadius: BorderRadius.lg },
-  groupChevron: { fontSize: 18, color: Colors.textMuted, width: 20, textAlign: 'center' },
+
   groupBody: { backgroundColor: Colors.white, borderLeftWidth: 1, borderRightWidth: 1, borderColor: Colors.border },
   groupBodyFirst: { borderTopWidth: 1, borderTopColor: Colors.divider },
   groupFoot: {
@@ -1076,11 +1086,11 @@ const s = StyleSheet.create({
   tgName: { flex: 1, fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   tgCount: { fontSize: 11, color: Colors.textMuted, fontWeight: '600' },
   tgLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingVertical: 7 },
-  tgIcon: { fontSize: 15, width: 24, textAlign: 'center' },
+  tgIcon: { marginHorizontal: 4 },
   tgLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   tgMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
   tgAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
-  tgChevron: { fontSize: 16, color: Colors.textMuted },
+
 
   safe: { flex: 1, backgroundColor: Colors.background },
   loading: { paddingVertical: Spacing.xl * 2, alignItems: 'center' },
@@ -1093,7 +1103,7 @@ const s = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
+
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 
@@ -1104,9 +1114,9 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
     borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  searchIcon: { fontSize: 14 },
+
   searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 4 },
-  searchClear: { fontSize: 15, fontWeight: '800', color: Colors.textMuted, paddingHorizontal: 4 },
+  searchClear: { marginHorizontal: 4 },
 
   statsRow: {
     flexDirection: 'row', alignItems: 'stretch', gap: Spacing.sm,
@@ -1178,7 +1188,7 @@ const s = StyleSheet.create({
     padding: Spacing.lg, alignItems: 'center', marginTop: Spacing.lg,
     borderWidth: 1, borderColor: Colors.border,
   },
-  emptyEmoji: { fontSize: 36, marginBottom: Spacing.sm },
+  emptyIcon: { marginBottom: Spacing.sm },
   emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 19 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -1191,7 +1201,7 @@ const s = StyleSheet.create({
   modalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, marginBottom: Spacing.base },
   modalTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
   modalSub: { fontSize: 12.5, color: Colors.textSecondary, marginTop: 2 },
-  modalClose: { fontSize: 18, color: Colors.textMuted, fontWeight: '700', padding: 2 },
+
 
   statusBanner: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

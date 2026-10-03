@@ -100,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await unregisterPushToken();
     await clearSession();
     setUser(null);
-    showAlert(TENANT_ACCOUNT_ENDED_TITLE, TENANT_ACCOUNT_ENDED_MESSAGE, undefined, '👋');
+    showAlert(TENANT_ACCOUNT_ENDED_TITLE, TENANT_ACCOUNT_ENDED_MESSAGE, undefined, 'door');
     return true;
   };
 

@@ -5,6 +5,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import type { EquipmentDto } from '@/types';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * THẺ THIẾT BỊ CỦA MỘT NHÀ — dùng chung cho màn chi tiết nhà chia phòng và nhà nguyên căn.
@@ -29,10 +30,10 @@ export const EquipmentSummaryCard: React.FC<{
   onOpen: () => void;
   /** Mặc định "Thiết bị" — danh sách nhà của màn Thiết bị truyền tên nhà vào đây. */
   title?: string;
-  icon?: string;
+  icon?: IconName;
   /** Chữ đứng trước số đếm, vd "Chia phòng". */
   prefix?: string;
-}> = ({ propertyId, onOpen, title = 'Thiết bị', icon = '📦', prefix }) => {
+}> = ({ propertyId, onOpen, title = 'Thiết bị', icon = 'package', prefix }) => {
   const [items, setItems] = useState<EquipmentDto[] | null>(null);
   const [failed, setFailed] = useState(false);
   /** id thiết bị đang có phiếu chưa đóng. */
@@ -74,7 +75,7 @@ export const EquipmentSummaryCard: React.FC<{
 
   return (
     <TouchableOpacity style={st.card} onPress={onOpen} activeOpacity={0.75}>
-      <View style={st.iconWrap}><Text style={st.icon}>{icon}</Text></View>
+      <View style={st.iconWrap}><Icon name={icon} size={19} color="#0284C7" /></View>
       <View style={{ flex: 1 }}>
         <Text style={st.title} numberOfLines={2}>{title}</Text>
         {sub == null
@@ -84,7 +85,7 @@ export const EquipmentSummaryCard: React.FC<{
       <View style={st.badges}>
         {fixing > 0 && (
           <View style={[st.badge, st.badgeFix]}>
-            <Text style={[st.badgeText, st.badgeFixText]}>🔧 {fixing} đang sửa</Text>
+            <IconText icon="wrench" gap={4} iconSize={12} style={[st.badgeText, st.badgeFixText]}>{fixing} đang sửa</IconText>
           </View>
         )}
         {replace > 0 && (
@@ -93,7 +94,7 @@ export const EquipmentSummaryCard: React.FC<{
           </View>
         )}
       </View>
-      <Text style={st.chevron}>›</Text>
+      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
   );
 };
@@ -109,7 +110,7 @@ const st = StyleSheet.create({
     width: 36, height: 36, borderRadius: BorderRadius.md,
     backgroundColor: '#0EA5E918', alignItems: 'center', justifyContent: 'center',
   },
-  icon: { fontSize: 18 },
+
   title: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   sub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   loader: { alignSelf: 'flex-start', marginTop: 2 },
@@ -121,5 +122,5 @@ const st = StyleSheet.create({
   badges: { alignItems: 'flex-end', gap: 4 },
   badgeFix: { backgroundColor: Colors.infoLight },
   badgeFixText: { color: Colors.info },
-  chevron: { fontSize: 18, color: Colors.textMuted },
+
 });

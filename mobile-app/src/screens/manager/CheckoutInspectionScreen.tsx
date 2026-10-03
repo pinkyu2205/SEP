@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
-import { CameraCaptureModal } from '@/components/common';
+import { CameraCaptureModal, Icon, IconText } from '@/components/common';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
 import { realTenantService } from '@/services/tenant/tenantService';
@@ -371,7 +371,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       if (!check.ok) {
         // Không giữ ảnh, không điền số — coi như chưa chụp.
         setMeterStatus(prev => ({ ...prev, [kind]: { tone: 'warn', text: check.reason ?? '' } }));
-        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫');
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, 'image-off');
         return;
       }
 
@@ -441,7 +441,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       if (result.status === 'mismatch') {
         // Chỉ từ chối khi ĐỌC RA thiết bị khác — đó mới là bằng chứng chụp nhầm.
         setEquipStatus(prev => ({ ...prev, [equipmentId]: { tone: 'warn', text: result.reason ?? '' } }));
-        showAlert('Ảnh có vẻ không phải thiết bị này', result.reason, undefined, '🚫');
+        showAlert('Ảnh có vẻ không phải thiết bị này', result.reason, undefined, 'image-off');
         return;   // không lưu ảnh — coi như chưa chụp
       }
 
@@ -711,7 +711,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           reading
             ? `Đã có chỉ số ${name} nhưng thiếu ảnh mặt đồng hồ. Chụp ảnh rồi mới chốt được quyết toán.`
             : `Phải nhập chỉ số ${name} cuối kỳ và chụp ảnh mặt đồng hồ thì mới chốt được quyết toán.`,
-          undefined, '📷',
+          undefined, 'camera',
         );
       }
     }
@@ -755,7 +755,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           'Máy chủ chưa hỗ trợ',
           'Chức năng lưu biên bản kiểm phòng chưa có trên máy chủ đang chạy. '
           + 'Báo đội backend triển khai bản có luồng trả phòng rồi thử lại.',
-          undefined, '🛠️',
+          undefined, 'info',
         );
         return;
       }
@@ -784,7 +784,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
               + 'đội backend cho phép ghi biên bản khi hồ sơ bị phản đối.'
             : `Máy chủ không cho ghi biên bản khi hồ sơ đang ở trạng thái `
               + `"${checkoutMeta(st).label}". Biên bản chỉ sửa được ở bước kiểm tra phòng.`,
-          undefined, '🔒',
+          undefined, 'lock',
         );
         return;
       }
@@ -806,7 +806,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Biên bản kiểm tra</Text>
         <View style={{ width: 40 }} />
@@ -855,7 +855,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                     style={s.photoRemove}
                     onPress={() => setPhotos(p => p.filter((_, idx) => idx !== i))}
                   >
-                    <Text style={s.photoRemoveText}>×</Text>
+                    <Icon name="close" size={12} color={Colors.white} strokeWidth={3} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -863,10 +863,10 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           )}
           <View style={s.photoActions}>
             <TouchableOpacity style={s.photoBtn} onPress={() => setCameraTarget('room')} disabled={uploading}>
-              <Text style={s.photoBtnText}>📷 Chụp ảnh</Text>
+              <IconText icon="camera" style={s.photoBtnText}>Chụp ảnh</IconText>
             </TouchableOpacity>
             <TouchableOpacity style={s.photoBtn} onPress={pickFromGallery} disabled={uploading}>
-              <Text style={s.photoBtnText}>🖼️ Chọn nhiều ảnh</Text>
+              <IconText icon="images" style={s.photoBtnText}>Chọn nhiều ảnh</IconText>
             </TouchableOpacity>
           </View>
           {uploading && (
@@ -906,7 +906,9 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
 
               return (
                 <View key={kind} style={[s.meterCol, !isElec && s.meterColLast]}>
-                  <Text style={s.label}>{isElec ? '⚡ Chỉ số điện' : '💧 Chỉ số nước'}</Text>
+                  <IconText icon={isElec ? 'electric' : 'water'} gap={4} style={s.label}>
+                    {isElec ? 'Chỉ số điện' : 'Chỉ số nước'}
+                  </IconText>
 
                   {/* Mốc đối chiếu — phải nói rõ lấy từ đâu, vì tiền tính theo hiệu số này */}
                   <Text style={s.meterPrev}>
@@ -982,9 +984,14 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                   )}
                   {/* Kết quả nhận diện ảnh: nhận đúng đồng hồ / ảnh đáng ngờ / bị từ chối */}
                   {!!status && (
-                    <Text style={status.tone === 'ok' ? s.meterOk : s.meterWarn}>
-                      {status.tone === 'ok' ? '✓ ' : '⚠️ '}{status.text}
-                    </Text>
+                    <IconText
+                      icon={status.tone === 'ok' ? 'check' : 'warning'}
+                      gap={4}
+                      multiline
+                      style={status.tone === 'ok' ? s.meterOk : s.meterWarn}
+                    >
+                      {status.text}
+                    </IconText>
                   )}
 
                   {/* Ảnh mặt đồng hồ lúc chốt */}
@@ -992,7 +999,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                     <View style={s.meterPhotoWrap}>
                       <Image source={{ uri: photo }} style={s.meterPhoto} />
                       <TouchableOpacity style={s.photoRemove} onPress={clearPhoto}>
-                        <Text style={s.photoRemoveText}>×</Text>
+                        <Icon name="close" size={12} color={Colors.white} strokeWidth={3} />
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -1009,14 +1016,14 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                       onPress={() => setCameraTarget(kind)}
                       disabled={busy}
                     >
-                      <Text style={s.meterBtnText}>📷 {photo ? 'Chụp lại' : 'Chụp'}</Text>
+                      <IconText icon="camera" gap={4} style={s.meterBtnText}>{photo ? 'Chụp lại' : 'Chụp'}</IconText>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[s.meterBtn, busy && s.btnDisabled]}
                       onPress={() => pickMeterFromGallery(kind)}
                       disabled={busy}
                     >
-                      <Text style={s.meterBtnText}>🖼️ {photo ? 'Chọn ảnh khác' : 'Chọn'}</Text>
+                      <IconText icon="images" gap={4} style={s.meterBtnText}>{photo ? 'Chọn ảnh khác' : 'Chọn'}</IconText>
                     </TouchableOpacity>
                   </View>
                   {busy && (
@@ -1050,7 +1057,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
               activeOpacity={0.7}
             >
               <View style={[s.confirmBox, meterConfirmed && s.confirmBoxOn]}>
-                {meterConfirmed && <Text style={s.confirmTick}>✓</Text>}
+                {meterConfirmed && <Icon name="check" size={13} color={Colors.white} strokeWidth={3} />}
               </View>
               <Text style={[s.confirmText, meterConfirmed && s.confirmTextOn]}>
                 Tôi xác nhận đã đọc đúng chỉ số trên mặt đồng hồ và ảnh kèm theo là chụp tại
@@ -1092,9 +1099,9 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                       style={[s.eqToggle, damaged ? s.eqToggleBad : s.eqToggleOk]}
                       onPress={() => toggleDamage(id)}
                     >
-                      <Text style={[s.eqToggleText, { color: damaged ? '#DC2626' : '#059669' }]}>
-                        {damaged ? '⚠️ Hư hỏng' : '✓ Nguyên vẹn'}
-                      </Text>
+                      <IconText icon={damaged ? 'warning' : 'check'} gap={4} style={[s.eqToggleText, { color: damaged ? '#DC2626' : '#059669' }]}>
+                        {damaged ? 'Hư hỏng' : 'Nguyên vẹn'}
+                      </IconText>
                     </TouchableOpacity>
                   </View>
                   {damaged && (
@@ -1127,7 +1134,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                                   ...prev, [id]: prev[id].filter((_, idx) => idx !== i),
                                 }))}
                               >
-                                <Text style={s.photoRemoveText}>×</Text>
+                                <Icon name="close" size={12} color={Colors.white} strokeWidth={3} />
                               </TouchableOpacity>
                             </View>
                           ))}
@@ -1140,9 +1147,9 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                           onPress={() => setCameraTarget({ equipmentId: id })}
                           disabled={equipBusy === id}
                         >
-                          <Text style={s.eqPhotoBtnText}>
-                            {equipBusy === id ? 'Đang kiểm ảnh…' : '📷 Chụp thiết bị'}
-                          </Text>
+                          {equipBusy === id
+                            ? <Text style={s.eqPhotoBtnText}>Đang kiểm ảnh…</Text>
+                            : <IconText icon="camera" gap={4} style={s.eqPhotoBtnText}>Chụp thiết bị</IconText>}
                         </TouchableOpacity>
                         {/* Đồ có tem nhãn thì cho lấy ảnh sẵn (vẫn phải qua kiểm tem).
                             Đồ không chữ không kiểm được nội dung → chỉ nhận chụp trực tiếp. */}
@@ -1152,7 +1159,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                             onPress={() => pickDamagePhotoFromGallery(id)}
                             disabled={equipBusy === id}
                           >
-                            <Text style={s.eqPhotoBtnText}>🖼️ Chọn từ máy</Text>
+                            <IconText icon="images" gap={4} style={s.eqPhotoBtnText}>Chọn từ máy</IconText>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -1196,12 +1203,12 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                 placeholderTextColor={Colors.textMuted}
               />
               <TouchableOpacity onPress={() => setExtras(list => list.filter((_, idx) => idx !== i))}>
-                <Text style={s.extraRemove}>×</Text>
+                <Icon name="close" size={18} color={Colors.error} style={s.extraRemove} />
               </TouchableOpacity>
             </View>
           ))}
           <TouchableOpacity style={s.addBtn} onPress={() => setExtras(list => [...list, { label: '', amount: '' }])}>
-            <Text style={s.addBtnText}>+ Thêm khoản trừ</Text>
+            <IconText icon="plus" gap={4} style={s.addBtnText}>Thêm khoản trừ</IconText>
           </TouchableOpacity>
         </View>
 
@@ -1243,7 +1250,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           onPress={() => save(true)}
           disabled={saving || uploading || blockers.length > 0}
         >
-          <Text style={s.primaryBtnText}>{saving ? 'Đang lưu...' : 'Lưu & sang quyết toán →'}</Text>
+          <Text style={s.primaryBtnText}>{saving ? 'Đang lưu...' : 'Lưu & sang quyết toán'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[s.ghostBtn, saving && s.btnDisabled]}
@@ -1278,7 +1285,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   body: { padding: Spacing.lg },
@@ -1308,7 +1315,7 @@ const s = StyleSheet.create({
     position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: 11,
     backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center',
   },
-  photoRemoveText: { color: Colors.white, fontSize: 15, fontWeight: '800', lineHeight: 17 },
+
   photoActions: { flexDirection: 'row', gap: Spacing.sm },
   photoBtn: {
     flex: 1, backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
@@ -1405,7 +1412,7 @@ const s = StyleSheet.create({
   eqPhotoHint: { fontSize: 11, color: Colors.textSecondary, marginTop: 6, lineHeight: 16 },
 
   extraRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
-  extraRemove: { fontSize: 22, color: Colors.error, fontWeight: '800', paddingHorizontal: 4 },
+  extraRemove: { marginHorizontal: 4 },
   addBtn: { paddingVertical: Spacing.sm, alignItems: 'center' },
   addBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
@@ -1438,7 +1445,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   confirmBoxOn: { backgroundColor: Colors.success, borderColor: Colors.success },
-  confirmTick: { fontSize: 12, fontWeight: '900', color: Colors.white },
+
   confirmText: { flex: 1, fontSize: 12, lineHeight: 17, color: Colors.textSecondary },
   confirmTextOn: { color: '#065F46', fontWeight: '600' },
   /** Chỗ giữ sẵn cho ô tick — nói rõ cần gì để nó hiện, thay vì im lặng không có gì. */

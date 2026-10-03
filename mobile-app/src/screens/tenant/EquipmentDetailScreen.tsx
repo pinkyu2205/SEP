@@ -18,14 +18,8 @@ import {
 } from '@/hooks/useMyEquipmentTickets';
 import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
 import { EquipmentQrScanModal } from '@/components/common/EquipmentQrScanModal';
-
-const CATEGORY_ICON: Record<string, string> = {
-  electrical: '⚡',
-  plumbing: '🚰',
-  furniture: '🛋️',
-  appliance: '❄️',
-  other: '🔧',
-};
+import { Icon, IconText } from '@/components/common/Icon';
+import { MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
@@ -130,7 +124,7 @@ export const EquipmentDetailScreen: React.FC = () => {
     remainingDepreciationAmount: detail.remainingDepreciationAmount,
   } : equipment;
   const name = equipName(eq);
-  const categoryIcon = CATEGORY_ICON[guessEquipmentCategory(name)] ?? '🔧';
+  const categoryIcon = MAINTENANCE_CATEGORY_ICON[guessEquipmentCategory(name)] ?? 'wrench';
   const status = equipmentDisplayStatus(equipment.status, summary, st => ({
     label: getEquipmentLifecycleLabel(st), ...getEquipmentLifecycleColor(st),
   }));
@@ -159,7 +153,7 @@ export const EquipmentDetailScreen: React.FC = () => {
 
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
-          <Text style={styles.backArrow}>‹</Text>
+          <Icon name="back" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết thiết bị</Text>
       </View>
@@ -168,7 +162,7 @@ export const EquipmentDetailScreen: React.FC = () => {
         {/* Tóm tắt */}
         <View style={styles.hero}>
           <View style={styles.heroTop}>
-            <View style={styles.iconBox}><Text style={styles.iconText}>{categoryIcon}</Text></View>
+            <View style={styles.iconBox}><Icon name={categoryIcon} size={28} color={Colors.primary} /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.equipName} numberOfLines={2}>{name}</Text>
               <Text style={styles.equipMeta}>
@@ -201,14 +195,14 @@ export const EquipmentDetailScreen: React.FC = () => {
             activeOpacity={0.8}
             onPress={() => navigation.navigate('MaintenanceDetail', { requestId: summary.open!.id })}
           >
-            <Text style={styles.openIcon}>🔧</Text>
+            <Icon name="wrench" size={20} color="#B45309" />
             <View style={{ flex: 1 }}>
               <Text style={styles.openTitle}>
                 Phiếu {summary.open.requestCode} · {TICKET_STATUS_META[summary.open.status]?.label ?? summary.open.status}
               </Text>
               <Text style={styles.openSub}>Thiết bị đang được xử lý — bấm để xem tiến độ</Text>
             </View>
-            <Text style={styles.chevron}>›</Text>
+            <Icon name="chevron-right" size={18} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
 
@@ -270,7 +264,7 @@ export const EquipmentDetailScreen: React.FC = () => {
                         {cost != null && cost > 0 ? `  ·  ${formatCurrency(cost)}` : ''}
                       </Text>
                     </View>
-                    <Text style={styles.chevron}>›</Text>
+                    <Icon name="chevron-right" size={18} color={Colors.textMuted} />
                   </TouchableOpacity>
                 );
               })}
@@ -302,9 +296,9 @@ export const EquipmentDetailScreen: React.FC = () => {
           disabled={checkingScan}
           activeOpacity={0.8}
         >
-          <Text style={styles.reportBtnText}>
-            {checkingScan ? 'Đang kiểm tra mã QR…' : '📷  Quét QR để báo hỏng'}
-          </Text>
+          {checkingScan
+            ? <Text style={styles.reportBtnText}>Đang kiểm tra mã QR…</Text>
+            : <IconText icon="scan-qr" style={styles.reportBtnText}>Quét QR để báo hỏng</IconText>}
         </TouchableOpacity>
       </View>
 
@@ -333,7 +327,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { fontSize: 30, lineHeight: 34, color: Colors.textPrimary },
+
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
 
   body: { padding: Spacing.base, gap: Spacing.md, paddingBottom: 110 },
@@ -347,7 +341,7 @@ const styles = StyleSheet.create({
     width: 60, height: 60, borderRadius: 16, backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  iconText: { fontSize: 30 },
+
   equipName: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
   equipMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   statusBadge: {
@@ -369,7 +363,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg, borderWidth: 1,
     borderColor: '#FCD34D', padding: Spacing.md,
   },
-  openIcon: { fontSize: 20 },
+
   openTitle: { fontSize: 13, fontWeight: '800', color: '#92400E' },
   openSub: { fontSize: 12, color: '#B45309', marginTop: 2 },
 
@@ -405,7 +399,7 @@ const styles = StyleSheet.create({
   histChipText: { fontSize: 11, fontWeight: '700' },
   histDesc: { fontSize: 13, color: Colors.textSecondary, marginTop: 3, lineHeight: 18 },
   histMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 3 },
-  chevron: { fontSize: 20, color: Colors.textMuted },
+
 
   tip: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
 

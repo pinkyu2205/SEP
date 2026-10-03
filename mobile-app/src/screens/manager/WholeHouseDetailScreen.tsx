@@ -15,6 +15,7 @@ import {
 } from '@/services/manager/invoiceService';
 import { serverNow } from '@/utils/serverTime';
 import { EquipmentSummaryCard } from '@/components/manager/EquipmentSummaryCard';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 const STATUS_META: Record<WholeHouseRentalStatus, { label: string; color: string; bg: string }> = {
   rented: { label: 'Đang thuê', color: Colors.success, bg: Colors.successLight },
@@ -33,12 +34,12 @@ const fmtIsoDate = (iso?: string) => {
 };
 
 // ─── Hoá đơn ────────────────────────────────────────────────────────────────
-const INV_TYPE: Record<string, { icon: string; label: string }> = {
-  RENT:        { icon: '🏠', label: 'Tiền nhà' },
-  ELECTRICITY: { icon: '⚡', label: 'Tiền điện' },
-  WATER:       { icon: '💧', label: 'Tiền nước' },
-  SERVICE:     { icon: '🧾', label: 'Phí dịch vụ' },
-  OTHER:       { icon: '🧾', label: 'Khoản khác' },
+const INV_TYPE: Record<string, { icon: IconName; label: string }> = {
+  RENT:        { icon: 'home',     label: 'Tiền nhà' },
+  ELECTRICITY: { icon: 'electric', label: 'Tiền điện' },
+  WATER:       { icon: 'water',    label: 'Tiền nước' },
+  SERVICE:     { icon: 'receipt',  label: 'Phí dịch vụ' },
+  OTHER:       { icon: 'receipt',  label: 'Khoản khác' },
 };
 
 const INV_STATUS: Record<ManagerInvoiceStatus, { label: string; color: string }> = {
@@ -169,7 +170,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
       <SafeAreaView style={s.safe}>
         <Header title="Nhà nguyên căn" onBack={() => navigation.goBack()} />
         <View style={s.emptyState}>
-          <Text style={s.emptyIcon}>🏠</Text>
+          <Icon name="home" size={42} color={Colors.textMuted} strokeWidth={1.5} />
           <Text style={s.emptyText}>Không tìm thấy nhà nguyên căn</Text>
         </View>
       </SafeAreaView>
@@ -189,7 +190,9 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
               <Text style={[s.heroTitle, { color: status.color === Colors.textSecondary ? Colors.textPrimary : status.color }]}>
                 {status.label}
               </Text>
-              {!!prop?.address && <Text style={s.heroSub} numberOfLines={2}>📍 {prop.address}</Text>}
+              {!!prop?.address && (
+                <IconText icon="location" gap={4} multiline style={s.heroSub} numberOfLines={2}>{prop.address}</IconText>
+              )}
             </View>
             <View style={[s.statusBadge, { backgroundColor: status.bg }]}>
               <Text style={[s.statusBadgeText, { color: status.color }]}>Nhà nguyên căn</Text>
@@ -229,11 +232,11 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
           <View style={s.loadingWrap}><ActivityIndicator size="large" color={Colors.primary} /></View>
         ) : !activeContract ? (
           <View style={s.vacantCard}>
-            <Text style={s.vacantEmoji}>🔑</Text>
+            <Icon name="key" size={34} color={Colors.primary} strokeWidth={1.6} style={s.vacantIcon} />
             <Text style={s.vacantTitle}>Nhà đang trống</Text>
             <Text style={s.vacantText}>Chưa có khách thuê. Hồ sơ khách do admin soạn sẵn, mở danh sách để nhận và đón khách.</Text>
             <TouchableOpacity style={s.vacantBtn} onPress={() => navigation.navigate('ResumeContract')}>
-              <Text style={s.vacantBtnText}>🤝  Khách chờ đón</Text>
+              <IconText icon="handshake" style={s.vacantBtnText}>Khách chờ đón</IconText>
             </TouchableOpacity>
           </View>
         ) : (
@@ -243,7 +246,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
               <Text style={s.sectionTitleInline}>Khách thuê</Text>
               {!!activeContract.tenantPhone && (
                 <TouchableOpacity style={s.linkBtn} onPress={callTenant} activeOpacity={0.7}>
-                  <Text style={s.linkBtnText}>📞 Gọi khách</Text>
+                  <IconText icon="phone" gap={4} style={s.linkBtnText}>Gọi khách</IconText>
                 </TouchableOpacity>
               )}
             </View>
@@ -284,7 +287,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
               />
               <InfoRow
                 label="Trạng thái cọc"
-                value={depositPaid ? '✓ Đã đóng cọc' : 'Chưa đóng cọc'}
+                value={depositPaid ? 'Đã đóng cọc' : 'Chưa đóng cọc'}
                 valueColor={depositPaid ? Colors.success : Colors.warning}
                 last
               />
@@ -295,7 +298,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
             <View style={s.sectionHead}>
               <Text style={s.sectionTitleInline}>Hoá đơn</Text>
               <TouchableOpacity style={s.linkBtn} onPress={openInvoices} activeOpacity={0.7}>
-                <Text style={s.linkBtnText}>Mở sổ hoá đơn ›</Text>
+                <IconText icon="chevron-right" trailing gap={2} style={s.linkBtnText}>Mở sổ hoá đơn</IconText>
               </TouchableOpacity>
             </View>
 
@@ -353,12 +356,12 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
 
                 {hiddenPeriods > 0 && (
                   <TouchableOpacity style={s.moreBtn} onPress={() => setExpandAll(true)} activeOpacity={0.7}>
-                    <Text style={s.moreBtnText}>Xem thêm {hiddenPeriods} kỳ trước ▾</Text>
+                    <IconText icon="chevron-down" trailing gap={2} style={s.moreBtnText}>Xem thêm {hiddenPeriods} kỳ trước</IconText>
                   </TouchableOpacity>
                 )}
                 {expandAll && periods.length > PERIODS_SHOWN && (
                   <TouchableOpacity style={s.moreBtn} onPress={() => setExpandAll(false)} activeOpacity={0.7}>
-                    <Text style={s.moreBtnText}>Thu gọn ▴</Text>
+                    <IconText icon="chevron-up" trailing gap={2} style={s.moreBtnText}>Thu gọn</IconText>
                   </TouchableOpacity>
                 )}
               </>
@@ -370,7 +373,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
               (`UtilityInvoiceServiceImpl.createFromWholeHouseBill`).
             */}
             <TouchableOpacity style={s.editBtn} activeOpacity={0.85} onPress={() => navigation.navigate('UtilityBilling')}>
-              <Text style={s.editBtnText}>⚡ Ghi chỉ số & gửi hoá đơn</Text>
+              <IconText icon="meter" style={s.editBtnText}>Ghi chỉ số & gửi hoá đơn</IconText>
             </TouchableOpacity>
             {thisPeriod.missing.length > 0 && (
               <Text style={s.editHint}>
@@ -401,7 +404,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
 const Header = ({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack: () => void }) => (
   <View style={s.header}>
     <TouchableOpacity style={s.backBtn} onPress={onBack}>
-      <Text style={s.backBtnText}>‹</Text>
+      <Icon name="back" size={24} color={Colors.primary} />
     </TouchableOpacity>
     <View style={{ flex: 1, alignItems: 'center' }}>
       <Text style={s.headerTitle} numberOfLines={1}>{title}</Text>
@@ -443,7 +446,7 @@ const InvoiceRow = ({ inv, first }: { inv: ManagerInvoice; first: boolean }) => 
       <View style={s.invLeft}>
         {/* Loại hoá đơn là tiêu đề, MÃ hoá đơn xuống dòng phụ. Bản cũ làm ngược:
             "HD-WAT-5" to đậm ở trên — một chuỗi quản lý không dùng vào việc gì. */}
-        <Text style={s.invTitle} numberOfLines={1}>{meta.icon}  {meta.label}</Text>
+        <IconText icon={meta.icon} iconColor={Colors.textSecondary} style={s.invTitle} numberOfLines={1}>{meta.label}</IconText>
         <Text style={s.invCode} numberOfLines={1}>
           {inv.code}
           {unpaid && !!inv.dueDate && ` · hạn ${fmtIsoDate(inv.dueDate)}`}
@@ -484,7 +487,7 @@ const s = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
   },
-  backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
+
   headerTitle: { fontSize: 16, color: Colors.textPrimary, fontWeight: '900' },
   headerSubtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
   scroll: { padding: Spacing.base, paddingBottom: Spacing['3xl'] },
@@ -547,7 +550,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg, marginTop: Spacing.lg,
     borderWidth: 1, borderColor: Colors.border, padding: Spacing.lg, alignItems: 'center', ...Shadow.sm,
   },
-  vacantEmoji: { fontSize: 34, marginBottom: Spacing.sm },
+  vacantIcon: { marginBottom: Spacing.sm },
   vacantTitle: { fontSize: 15, fontWeight: '900', color: Colors.textPrimary, marginBottom: 4 },
   vacantText: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', lineHeight: 18, marginBottom: Spacing.md },
   vacantBtn: { backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.sm },
@@ -594,6 +597,6 @@ const s = StyleSheet.create({
   editBtnText: { color: Colors.white, fontSize: 14, fontWeight: '900' },
   editHint: { fontSize: 11, color: Colors.warning, fontWeight: '700', textAlign: 'center', marginTop: 6 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
-  emptyIcon: { fontSize: 42 },
+
   emptyText: { color: Colors.textSecondary, fontSize: 14, fontWeight: '700' },
 });

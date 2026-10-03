@@ -2,6 +2,7 @@
  * Utility functions cho ứng dụng.
  */
 import { serverNow } from './serverTime';
+import type { IconName } from '@/components/common/Icon';
 
 /**
  * Format số tiền VND.
@@ -362,24 +363,24 @@ export const guessEquipmentCategory = (
   return 'other';
 };
 
-export const getNotificationTypeEmoji = (type: string): string => {
-  const map: Record<string, string> = {
-    new_bill: '📄',
-    bill_overdue: '⚠️',
-    payment_success: '✅',
-    payment_failed: '❌',
-    payment_pending_verify: '🕐',
-    contract_expiring: '📋',
-    contract_expired: '📋',
-    maintenance_new: '🔧',
-    maintenance_accepted: '🔧',
-    maintenance_resolved: '✅',
-    equipment_damaged: '⚙️',
-    meter_reading_due: '📊',
-    tenant_onboarded: '🏠',
-    system: '🔔',
+export const getNotificationTypeIcon = (type: string): IconName => {
+  const map: Record<string, IconName> = {
+    new_bill: 'receipt',
+    bill_overdue: 'warning',
+    payment_success: 'success',
+    payment_failed: 'error',
+    payment_pending_verify: 'clock',
+    contract_expiring: 'contract',
+    contract_expired: 'contract',
+    maintenance_new: 'wrench',
+    maintenance_accepted: 'wrench',
+    maintenance_resolved: 'success',
+    equipment_damaged: 'settings',
+    meter_reading_due: 'meter',
+    tenant_onboarded: 'home',
+    system: 'bell',
   };
-  return map[type] || '🔔';
+  return map[type] || 'bell';
 };
 
 export const getDaysUntil = (dateStr: string): number => {

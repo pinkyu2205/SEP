@@ -34,6 +34,7 @@ import {
   type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { Dot, Icon, IconText, type IconName } from '@/components/common/Icon';
 import { extractEquipmentIdFromQr, toEquipmentQrCode } from '@/utils/equipmentQr';
 import { toLocalDateTime, toApiDateTime, isBeforeAppointmentDay } from '@/utils/maintenanceAppointment';
 import {
@@ -58,17 +59,17 @@ const arrivalConfirmStorageKey = (id: number) => `maint_arrival_confirmed_at_${i
 const STATUS_CONFIG: Record<TicketStatus, StatusMeta> = MAINTENANCE_STATUS_META;
 
 const PRIORITY_CONFIG = {
-  urgent: { label: '🚨 Khẩn cấp',  color: '#EF4444', bg: '#FEF2F2' },
-  high:   { label: '🔴 Cao',        color: '#F97316', bg: '#FFF7ED' },
-  medium: { label: '🟡 Trung bình', color: '#F59E0B', bg: '#FFFBEB' },
-  low:    { label: '🟢 Thấp',       color: '#10B981', bg: '#F0FDF4' },
+  urgent: { label: 'Khẩn cấp',   color: '#EF4444', bg: '#FEF2F2' },
+  high:   { label: 'Cao',        color: '#F97316', bg: '#FFF7ED' },
+  medium: { label: 'Trung bình', color: '#F59E0B', bg: '#FFFBEB' },
+  low:    { label: 'Thấp',       color: '#10B981', bg: '#F0FDF4' },
 } as const;
 
-const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> = {
-  appliance:  { label: 'Trang thiết bị',  icon: '📺' },
-  furniture:  { label: 'Nội thất',        icon: '🪑' },
-  plumbing:   { label: 'Nước / Ống',      icon: '🚰' },
-  electrical: { label: 'Điện',            icon: '⚡' },
+const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: IconName }> = {
+  appliance:  { label: 'Trang thiết bị',  icon: 'ac' },
+  furniture:  { label: 'Nội thất',        icon: 'sofa' },
+  plumbing:   { label: 'Nước / Ống',      icon: 'bath' },
+  electrical: { label: 'Điện',            icon: 'electric' },
 };
 
 /** Thứ tự hiển thị dropdown phân loại lúc duyệt (khớp enum BE). */
@@ -140,11 +141,11 @@ const daysLeft = (deadline?: string): number | null => {
 
 type PhotoKind = 'before' | 'after' | 'fault_evidence' | 'invoice';
 
-const PHOTO_KIND_META: Record<PhotoKind, { label: string; color: string; icon: string }> = {
-  before:         { label: '📸 Ảnh hiện trạng',   color: Colors.warning, icon: '📷' },
-  after:          { label: '🖼️ Ảnh sau sửa chữa', color: Colors.success, icon: '🖼️' },
-  fault_evidence: { label: '⚠️ Bằng chứng lỗi',    color: '#DC2626',      icon: '⚠️' },
-  invoice:        { label: '🧾 Ảnh hoá đơn',       color: '#0369A1',      icon: '🧾' },
+const PHOTO_KIND_META: Record<PhotoKind, { label: string; color: string; icon: IconName }> = {
+  before:         { label: 'Ảnh hiện trạng',   color: Colors.warning, icon: 'camera' },
+  after:          { label: 'Ảnh sau sửa chữa', color: Colors.success, icon: 'image' },
+  fault_evidence: { label: 'Bằng chứng lỗi',   color: '#DC2626',      icon: 'alert' },
+  invoice:        { label: 'Ảnh hoá đơn',      color: '#0369A1',      icon: 'receipt' },
 };
 
 const PhotoEvidenceRow: React.FC<{
@@ -183,10 +184,12 @@ const PhotoEvidenceRow: React.FC<{
   return (
     <View style={phs.container}>
       <View style={phs.header}>
-        <Text style={phs.label}>{meta.label}</Text>
+        <IconText icon={meta.icon} iconColor={meta.color} gap={5} style={phs.label}>{meta.label}</IconText>
         {!disabled && !atLimit && (
           <TouchableOpacity style={[phs.addBtn, { borderColor: meta.color }]} onPress={onAdd}>
-            <Text style={[phs.addBtnText, { color: meta.color }]}>+ Thêm {allowVideo ? 'ảnh/video' : 'ảnh'}</Text>
+            <IconText icon="plus" gap={3} iconSize={12} style={[phs.addBtnText, { color: meta.color }]}>
+              Thêm {allowVideo ? 'ảnh/video' : 'ảnh'}
+            </IconText>
           </TouchableOpacity>
         )}
         {!disabled && atLimit && (
@@ -195,7 +198,7 @@ const PhotoEvidenceRow: React.FC<{
       </View>
       {isEmpty ? (
         <View style={[phs.emptyBox, { borderColor: meta.color + '40' }]}>
-          <Text style={phs.emptyIcon}>{meta.icon}</Text>
+          <Icon name={meta.icon} size={20} color={meta.color} strokeWidth={1.75} />
           <Text style={phs.emptyText}>Chưa có ảnh</Text>
         </View>
       ) : (
@@ -209,15 +212,15 @@ const PhotoEvidenceRow: React.FC<{
               >
                 {isVideo ? (
                   <View style={[phs.photoPlaceholder, phs.videoTile, { width: '100%' }]}>
-                    <Text style={{ fontSize: 22 }}>🎬</Text>
-                    <Text style={phs.videoPlayHint}>▶ Xem video</Text>
+                    <Icon name="play-circle" size={24} color={Colors.white} strokeWidth={1.75} />
+                    <Text style={phs.videoPlayHint}>Xem video</Text>
                   </View>
                 ) : (
                   <Image source={{ uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
                 )}
                 {onRemoveServer && (
                   <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveServer(uri)}>
-                    <Text style={phs.photoRemoveBtnText}>✕</Text>
+                    <Icon name="close" size={11} color={Colors.white} strokeWidth={3} />
                   </TouchableOpacity>
                 )}
               </TouchableOpacity>
@@ -239,20 +242,20 @@ const PhotoEvidenceRow: React.FC<{
               >
                 {isVideo ? (
                   <View style={[phs.photoPlaceholder, { backgroundColor: meta.color + '15' }]}>
-                    <Text style={phs.photoPlaceholderIcon}>🎬</Text>
+                    <Icon name="video" size={26} color={meta.color} strokeWidth={1.75} />
                     <Text style={phs.videoDurationText}>{formatDurationLabel(photo.durationMs)}</Text>
                   </View>
                 ) : photo.uri ? (
                   <Image source={{ uri: photo.uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
                 ) : (
                   <View style={[phs.photoPlaceholder, { backgroundColor: meta.color + '15' }]}>
-                    <Text style={phs.photoPlaceholderIcon}>{meta.icon}</Text>
+                    <Icon name={meta.icon} size={26} color={meta.color} strokeWidth={1.75} />
                   </View>
                 )}
                 <Text style={phs.photoDate}>{photo.capturedAt.split(' ')[0]}</Text>
                 {onRemoveLocal && (
                   <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveLocal(photo.id)}>
-                    <Text style={phs.photoRemoveBtnText}>✕</Text>
+                    <Icon name="close" size={11} color={Colors.white} strokeWidth={3} />
                   </TouchableOpacity>
                 )}
               </TouchableOpacity>
@@ -271,18 +274,18 @@ const phs = StyleSheet.create({
   addBtn:               { borderWidth: 1, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
   addBtnText:           { fontSize: 11, fontWeight: '700' },
   emptyBox:             { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, borderWidth: 1, borderStyle: 'dashed', borderRadius: BorderRadius.md, padding: Spacing.md },
-  emptyIcon:            { fontSize: 20 },
+
   emptyText:            { fontSize: 13, color: Colors.textMuted },
   scrollRow:            { flexGrow: 0 },
   photoCard:            { width: 100, marginRight: Spacing.sm, borderRadius: BorderRadius.md, borderWidth: 1, overflow: 'hidden' },
   photoPlaceholder:     { height: 72, alignItems: 'center', justifyContent: 'center' },
-  photoPlaceholderIcon: { fontSize: 28 },
+
   photoDate:            { fontSize: 9, color: Colors.textMuted, paddingHorizontal: 4, paddingVertical: 4 },
   photoRemoveBtn: {
     position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9,
     backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',
   },
-  photoRemoveBtnText: { color: Colors.white, fontSize: 10, fontWeight: '900' },
+
   limitText:            { fontSize: 10, color: Colors.textMuted, fontStyle: 'italic', maxWidth: 160, textAlign: 'right' },
   videoTile:            { backgroundColor: '#0F172A', gap: 2 },
   videoPlayHint:        { color: Colors.white, fontSize: 10, fontWeight: '700' },
@@ -464,7 +467,11 @@ export const TicketDetailScreen: React.FC = () => {
       await refreshReal();
       setInvoiceAmountText(''); setNoteInput('');
       if (handedOver?.status === 'WAITING_PAYMENT') {
-        showAlert('📦 Đã bàn giao', 'Đã lập hoá đơn cho khách — phiếu chuyển sang "Chờ thanh toán" (hạn 5 ngày), tự đóng khi khách thanh toán.');
+        showAlert(
+          'Đã bàn giao',
+          'Đã lập hoá đơn cho khách — phiếu chuyển sang "Chờ thanh toán" (hạn 5 ngày), tự đóng khi khách thanh toán.',
+          undefined, 'package',
+        );
       }
     } catch (e: any) {
       showAlert('Không thể bàn giao', apiErrMsg(e, 'Vui lòng thử lại.'));
@@ -501,8 +508,9 @@ export const TicketDetailScreen: React.FC = () => {
         await refreshReal();
         setVerifyNote('');
         showAlert(
-          accepted ? '✅ Đã chấp nhận' : 'Không đạt',
+          accepted ? 'Đã chấp nhận' : 'Không đạt',
           accepted ? 'Phiếu đã hoàn tất.' : 'Ghi nhận chưa đạt — khoản thiệt hại sẽ chờ trừ cọc lúc trả phòng.',
+          undefined, accepted ? 'success' : 'alert',
         );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể xử lý. Vui lòng thử lại.')); }
       finally { setVerifying(false); }
@@ -634,7 +642,7 @@ export const TicketDetailScreen: React.FC = () => {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backIcon}>‹</Text>
+            <Icon name="back" size={28} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Không tìm thấy ticket</Text>
         </View>
@@ -684,10 +692,10 @@ export const TicketDetailScreen: React.FC = () => {
     !needsReplacementEff && invoiceAmountNum > 0
     && equipRemainingValue != null && equipRemainingValue > 0 && invoiceAmountNum > equipRemainingValue
   ) ? (
-    <Text style={[s.costHint, { color: '#B45309', fontWeight: '600', marginTop: Spacing.xs }]}>
-      ⚠️ Chi phí sửa ({fmt(invoiceAmountNum)}) đang cao hơn giá trị còn lại của thiết bị ({fmt(equipRemainingValue)}).
+    <IconText icon="warning" multiline style={[s.costHint, { color: '#B45309', fontWeight: '600', marginTop: Spacing.xs }]}>
+      Chi phí sửa ({fmt(invoiceAmountNum)}) đang cao hơn giá trị còn lại của thiết bị ({fmt(equipRemainingValue)}).
       Cân nhắc tick "Thiết bị hỏng hoàn toàn — cần thay mới" thay vì sửa tiếp.
-    </Text>
+    </IconText>
   ) : null;
 
   /** Tổng ảnh/video hiện có (server + local) theo từng loại — dùng để chặn thêm khi đã
@@ -911,7 +919,8 @@ export const TicketDetailScreen: React.FC = () => {
     }
 
     let repairAppointmentAt: string | undefined;
-    if (fromInspection || diagnoseWantsSchedule) {
+    // Thay mới không có lịch sửa/giao máy (03/10/2026).
+    if (!diagnoseNeedsReplacement && (fromInspection || diagnoseWantsSchedule)) {
       const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
       if (!dt) {
         showAlert('Thiếu lịch hẹn', fromInspection
@@ -940,20 +949,32 @@ export const TicketDetailScreen: React.FC = () => {
         category: approveCategory.toUpperCase() as MaintenanceReqCategory,
         priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
       });
+      const replaced = diagnoseNeedsReplacement;
       await refreshReal();
       setDiagnoseFormOpen(false);
       setDiagnoseCause(null); setDiagnoseFaultReason('');
       setDiagnoseTenantAgreesToPay(null); setDiagnoseCompanyAbsorbedNote(''); setDiagnoseWantsSchedule(false);
       setDiagnoseNeedsReplacement(false);
+      if (replaced) {
+        showAlert(
+          'Đã báo thay thiết bị',
+          diagnoseCause === 'TENANT_MISUSE' && tenantAgreesToPay
+            ? 'Đã lập hoá đơn thu khách (hạn 5 ngày) — khách quét QR trong app. Admin được báo để nhập thiết bị mới.'
+            : 'Phiếu đã kết thúc. Admin được báo để nhập thiết bị mới.',
+          undefined, 'success',
+        );
+        return;
+      }
       showAlert(
         diagnoseCause === 'WEAR'
-          ? '✅ Đã ghi nhận hao mòn tự nhiên'
-          : tenantAgreesToPay === false ? '⚠️ Công ty trả hộ chi phí' : '⚠️ Đã ghi nhận lỗi do khách',
+          ? 'Đã ghi nhận hao mòn tự nhiên'
+          : tenantAgreesToPay === false ? 'Công ty trả hộ chi phí' : 'Đã ghi nhận lỗi do khách',
         repairAppointmentAt
           ? 'Đã đặt lịch sửa/giao máy — chờ tới đúng lịch hẹn.'
           : diagnoseCause === 'TENANT_MISUSE' && tenantAgreesToPay
             ? 'Bạn có thể sửa ngay. Hoá đơn thu khách (hạn 5 ngày) sẽ được lập khi bạn báo sửa xong — nhập chi phí 1 lần ở bước đó.'
             : 'Đang tiến hành sửa chữa.',
+        undefined, diagnoseCause === 'WEAR' ? 'success' : 'warning',
       );
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận chẩn đoán. Vui lòng thử lại.')); }
     finally { setDiagnosing(false); }
@@ -980,8 +1001,9 @@ export const TicketDetailScreen: React.FC = () => {
       setInspectionFormOpen(false);
       setInspectionDate(''); setInspectionTime(null); setInspectionNote('');
       showAlert(
-        '📦 Đã ghi nhận — mang thiết bị đi kiểm tra thêm',
+        'Đã ghi nhận — mang thiết bị đi kiểm tra thêm',
         'Khi có kết quả, vào lại phiếu để nhập chẩn đoán & báo giá.',
+        undefined, 'package',
       );
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận. Vui lòng thử lại.')); }
     finally { setSendingForInspection(false); }
@@ -1058,12 +1080,13 @@ export const TicketDetailScreen: React.FC = () => {
         const waitingPayment = completed?.status === 'WAITING_PAYMENT';
         const willCharge = !ticket.chargeInvoiceId && (ticket.status === 'tenant_fault' || chargeToTenant);
         showAlert(
-          '🛠 Đã báo sửa xong',
+          'Đã báo sửa xong',
           waitingPayment
             ? 'Phiếu chuyển sang "Chờ thanh toán" — khách thanh toán hoá đơn trong 5 ngày, phiếu tự đóng khi khách trả xong.'
             : willCharge
               ? 'Hệ thống đã tự tạo hoá đơn — khách thanh toán trong màn chi tiết yêu cầu.'
               : 'Phiếu đã hoàn tất.',
+          undefined, 'success',
         );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
       finally { setBusy(false); }
@@ -1106,16 +1129,20 @@ export const TicketDetailScreen: React.FC = () => {
    */
   const renderDiagnoseForm = (fromInspection: boolean) => (
     <View style={[s.card, { borderColor: Colors.primary, borderWidth: 1.5 }]}>
-      <Text style={s.cardSectionTitle}>🔍 Chẩn đoán & báo giá</Text>
+      <Text style={s.cardSectionTitle}>Chẩn đoán & báo giá</Text>
 
       <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>
         {ticket.category ? 'Phân loại sự cố' : 'Phân loại sự cố (bắt buộc)'}
       </Text>
       <TouchableOpacity style={s.dropdownBtn} onPress={() => setCategoryMenuOpen(o => !o)} activeOpacity={0.75}>
-        <Text style={[s.dropdownBtnText, !approveCategory && s.dropdownBtnPlaceholder]}>
-          {approveCategory ? `${CATEGORY_CONFIG[approveCategory].icon} ${CATEGORY_CONFIG[approveCategory].label}` : 'Chọn danh mục sự cố'}
-        </Text>
-        <Text style={s.dropdownChevron}>{categoryMenuOpen ? '▲' : '▼'}</Text>
+        {approveCategory ? (
+          <IconText icon={CATEGORY_CONFIG[approveCategory].icon} gap={8} style={s.dropdownBtnText}>
+            {CATEGORY_CONFIG[approveCategory].label}
+          </IconText>
+        ) : (
+          <Text style={[s.dropdownBtnText, s.dropdownBtnPlaceholder]}>Chọn danh mục sự cố</Text>
+        )}
+        <Icon name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} />
       </TouchableOpacity>
       {categoryMenuOpen && (
         <View style={s.dropdownList}>
@@ -1129,7 +1156,9 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={() => { setApproveCategory(key); setCategoryMenuOpen(false); }}
                 activeOpacity={0.75}
               >
-                <Text style={[s.dropdownItemText, active && s.dropdownItemTextActive]}>{c.icon} {c.label}</Text>
+                <IconText icon={c.icon} gap={8} style={[s.dropdownItemText, active && s.dropdownItemTextActive]}>
+                  {c.label}
+                </IconText>
               </TouchableOpacity>
             );
           })}
@@ -1142,9 +1171,9 @@ export const TicketDetailScreen: React.FC = () => {
         activeOpacity={0.75}
       >
         <View style={[s.checkbox, diagnoseNeedsReplacement && s.checkboxChecked]}>
-          {diagnoseNeedsReplacement && <Text style={s.checkboxMark}>✓</Text>}
+          {diagnoseNeedsReplacement && <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />}
         </View>
-        <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
+        <Text style={s.cardSectionTitle}>Thiết bị hỏng hoàn toàn — cần thay mới</Text>
       </TouchableOpacity>
       {diagnoseNeedsReplacement && (
         <>
@@ -1232,7 +1261,7 @@ export const TicketDetailScreen: React.FC = () => {
                 multiline
               />
               <Text style={s.pickHint}>
-                Công ty sẽ trả hộ chi phí này — không lập hoá đơn thu khách. 🚩 Khách sẽ bị GẮN CỜ ĐỎ: admin xem xét
+                Công ty sẽ trả hộ chi phí này — không lập hoá đơn thu khách. Khách sẽ bị GẮN CỜ ĐỎ: admin xem xét
                 (chấm dứt hợp đồng / trừ cọc lúc trả phòng) ở trang "Khách từ chối trả" trên web.
               </Text>
             </>
@@ -1240,7 +1269,20 @@ export const TicketDetailScreen: React.FC = () => {
         </>
       )}
 
-      {fromInspection ? (
+      {/* 03/10/2026: THAY MỚI = không sửa, không lịch sửa/giao máy, không ảnh sau sửa. Chẩn đoán xong là
+          phiếu kết thúc: thiết bị đánh dấu Hỏng, admin được báo để nhập thiết bị mới (cải tạo bổ sung).
+          Khách trả → lập QR hạn 5 ngày, trả xong phiếu tự đóng. Đặc tả BE:
+          docs/BE-YEUCAU-thay-moi-ket-thuc-tai-chan-doan-2026-10-03.md */}
+      {diagnoseNeedsReplacement ? (
+        <View style={[s.card, { marginTop: Spacing.md, marginBottom: 0, backgroundColor: '#FFFBEB', borderColor: '#FDE68A', borderWidth: 1 }]}>
+          <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Không sửa — báo admin thay thiết bị</Text>
+          <Text style={[s.descText, { color: '#92400E' }]}>
+            {diagnoseCause === 'TENANT_MISUSE' && diagnoseTenantAgreesToPay
+              ? `Xác nhận xong: hệ thống lập QR thu khách ${diagnoseAutoDamageAmount ? fmt(diagnoseAutoDamageAmount) : ''} (hạn 5 ngày), thiết bị chuyển "Hỏng", admin được báo để nhập thiết bị mới. Phiếu tự đóng khi khách trả.`
+              : 'Xác nhận xong: phiếu đóng, thiết bị chuyển "Hỏng", admin được báo để nhập thiết bị mới. Không cần ảnh sau sửa chữa.'}
+          </Text>
+        </View>
+      ) : fromInspection ? (
         <>
           <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Lịch hẹn giao máy / sửa chính thức (bắt buộc)</Text>
           <AppointmentSlotPicker
@@ -1261,9 +1303,9 @@ export const TicketDetailScreen: React.FC = () => {
             activeOpacity={0.75}
           >
             <View style={[s.checkbox, diagnoseWantsSchedule && s.checkboxChecked]}>
-              {diagnoseWantsSchedule && <Text style={s.checkboxMark}>✓</Text>}
+              {diagnoseWantsSchedule && <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />}
             </View>
-            <Text style={s.cardSectionTitle}>🗓 Đặt lịch sửa sau thay vì sửa ngay</Text>
+            <Text style={s.cardSectionTitle}>Đặt lịch sửa sau thay vì sửa ngay</Text>
           </TouchableOpacity>
           {diagnoseWantsSchedule && (
             <View style={{ marginTop: Spacing.sm }}>
@@ -1286,11 +1328,11 @@ export const TicketDetailScreen: React.FC = () => {
         onPress={() => submitDiagnose(fromInspection)}
         disabled={diagnosing}
       >
-        <Text style={s.advanceBtnText}>{diagnosing ? 'Đang gửi...' : '✅ Xác nhận chẩn đoán'}</Text>
+        <Text style={s.advanceBtnText}>{diagnosing ? 'Đang gửi...' : 'Xác nhận chẩn đoán'}</Text>
       </TouchableOpacity>
       {!fromInspection && (
         <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setDiagnoseFormOpen(false)}>
-          <Text style={[{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <IconText icon="arrow-left" gap={4} style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>Quay lại</IconText>
         </TouchableOpacity>
       )}
     </View>
@@ -1366,7 +1408,7 @@ export const TicketDetailScreen: React.FC = () => {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backIcon}>‹</Text>
+            <Icon name="back" size={28} color={Colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={s.headerCode}>{ticket.ticketCode}</Text>
@@ -1375,7 +1417,7 @@ export const TicketDetailScreen: React.FC = () => {
         </View>
         <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>📦 Đang mang đi kiểm tra</Text>
+            <Text style={s.cardSectionTitle}>Đang mang đi kiểm tra</Text>
             <Text style={s.descText}>
               {ticket.roomName} · {ticket.tenantName}{ticket.equipmentName ? ` · ${ticket.equipmentName}` : ''}
             </Text>
@@ -1391,7 +1433,7 @@ export const TicketDetailScreen: React.FC = () => {
 
           {!diagnoseFormOpen ? (
             <TouchableOpacity style={[s.advanceBtn, { backgroundColor: Colors.primary }]} onPress={() => setDiagnoseFormOpen(true)}>
-              <Text style={s.advanceBtnText}>📋 Nhập kết quả chẩn đoán</Text>
+              <Text style={s.advanceBtnText}>Nhập kết quả chẩn đoán</Text>
             </TouchableOpacity>
           ) : renderDiagnoseForm(true)}
 
@@ -1411,15 +1453,15 @@ export const TicketDetailScreen: React.FC = () => {
             <Pressable style={s.photoMenuCard} onPress={() => {}}>
               <Text style={s.photoMenuTitle}>Thêm ảnh/video</Text>
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
-                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+                <IconText icon="camera" gap={8} style={s.photoMenuOptionText}>Chụp ảnh</IconText>
               </TouchableOpacity>
               {Platform.OS !== 'web' && (
                 <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
-                  <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+                  <IconText icon="video" gap={8} style={s.photoMenuOptionText}>Quay video</IconText>
                 </TouchableOpacity>
               )}
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
-                <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+                <IconText icon="images" gap={8} style={s.photoMenuOptionText}>Chọn từ thư viện</IconText>
               </TouchableOpacity>
               <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
                 <Text style={s.photoMenuCancelText}>Đóng</Text>
@@ -1459,7 +1501,7 @@ export const TicketDetailScreen: React.FC = () => {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backIcon}>‹</Text>
+            <Icon name="back" size={28} color={Colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={s.headerCode}>{ticket.ticketCode}</Text>
@@ -1468,7 +1510,7 @@ export const TicketDetailScreen: React.FC = () => {
         </View>
         <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
+            <Text style={s.cardSectionTitle}>Mang thiết bị đi kiểm tra thêm</Text>
             <Text style={s.descText}>
               {ticket.roomName} · {ticket.tenantName}{ticket.equipmentName ? ` · ${ticket.equipmentName}` : ''}
             </Text>
@@ -1484,7 +1526,7 @@ export const TicketDetailScreen: React.FC = () => {
               đơn thu khách lúc bàn giao (BE 24/09/2026). Ẩn khi công ty trả hộ / phiếu cũ đã có hoá đơn. */}
           {needsHandoverInvoice && (
             <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
-              <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+              <Text style={s.cardSectionTitle}>Hoá đơn sửa chữa</Text>
               <PhotoEvidenceRow
                 type="invoice" urls={ticket.invoiceImages} photos={photos}
                 onAdd={() => setPhotoMenuFor('invoice')}
@@ -1527,13 +1569,15 @@ export const TicketDetailScreen: React.FC = () => {
 
           {/* Bước 2 (song song bước 1, không cần đúng thứ tự): đặt/đổi lịch bàn giao */}
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🗓 Lịch bàn giao</Text>
+            <Text style={s.cardSectionTitle}>Lịch bàn giao</Text>
             <Text style={s.descText}>
               {ticket.repairAppointmentAt ? formatDateTime(ticket.repairAppointmentAt) : 'Chưa đặt lịch'}
             </Text>
             {canSetHandoverDate && (
               <TouchableOpacity style={[s.reviewBtn, { marginTop: Spacing.sm, alignSelf: 'flex-start', paddingHorizontal: Spacing.lg }]} onPress={openRescheduleRepair}>
-                <Text style={s.reviewBtnText}>{ticket.repairAppointmentAt ? '🗓 Đổi lịch bàn giao' : '🗓 Đặt lịch bàn giao'}</Text>
+                <IconText icon="calendar" gap={5} style={s.reviewBtnText}>
+                  {ticket.repairAppointmentAt ? 'Đổi lịch bàn giao' : 'Đặt lịch bàn giao'}
+                </IconText>
               </TouchableOpacity>
             )}
           </View>
@@ -1541,7 +1585,7 @@ export const TicketDetailScreen: React.FC = () => {
           {/* Bước 3: đang chờ khách thanh toán */}
           {hasUnpaidCharge && ticket.issuedInvoice && !ticket.companyAbsorbedFault && (
             <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
-              <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Hoá đơn đã lập — khách thanh toán trong 5 ngày</Text>
+              <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Hoá đơn đã lập — khách thanh toán trong 5 ngày</Text>
               <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
                 {fmt(ticket.issuedInvoice.grandTotal)}
               </Text>
@@ -1562,8 +1606,8 @@ export const TicketDetailScreen: React.FC = () => {
             <View style={[s.card, { borderColor: Colors.success, borderWidth: 1.5 }]}>
               <Text style={s.cardSectionTitle}>
                 {ticket.companyAbsorbedFault
-                  ? '✅ Công ty trả hộ — sẵn sàng bàn giao'
-                  : needsHandoverInvoice ? '📦 Bàn giao thiết bị (hoá đơn thu khách lập khi bàn giao)' : '✅ Sẵn sàng bàn giao (phiếu đóng khi khách trả xong)'}
+                  ? 'Công ty trả hộ — sẵn sàng bàn giao'
+                  : needsHandoverInvoice ? 'Bàn giao thiết bị (hoá đơn thu khách lập khi bàn giao)' : 'Sẵn sàng bàn giao (phiếu đóng khi khách trả xong)'}
               </Text>
               {needsHandoverInvoice && !handoverInvoiceReady && (
                 <Text style={s.pickHint}>Cần ảnh hoá đơn{replacementDecided ? '' : ' và số tiền hoá đơn'} ở trên trước khi bàn giao.</Text>
@@ -1585,9 +1629,13 @@ export const TicketDetailScreen: React.FC = () => {
                   onPress={() => setHandoverScanOpen(true)}
                   disabled={!readyToHandover || !hasAfterPhoto || handoverBusy}
                 >
-                  <Text style={s.advanceBtnText}>
-                    {handoverBusy ? 'Đang bàn giao...' : !hasAfterPhoto ? '📷 Quét QR bàn giao (cần ảnh AFTER)' : '📷 Quét QR bàn giao'}
-                  </Text>
+                  {handoverBusy
+                    ? <Text style={s.advanceBtnText}>Đang bàn giao...</Text>
+                    : (
+                      <IconText icon="scan-qr" style={s.advanceBtnText}>
+                        {!hasAfterPhoto ? 'Quét QR bàn giao (cần ảnh AFTER)' : 'Quét QR bàn giao'}
+                      </IconText>
+                    )}
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
@@ -1595,7 +1643,7 @@ export const TicketDetailScreen: React.FC = () => {
                   onPress={doHandover}
                   disabled={!readyToHandover || !hasAfterPhoto || handoverBusy}
                 >
-                  <Text style={s.advanceBtnText}>{handoverBusy ? 'Đang bàn giao...' : '✅ Xác nhận đã bàn giao'}</Text>
+                  <Text style={s.advanceBtnText}>{handoverBusy ? 'Đang bàn giao...' : 'Xác nhận đã bàn giao'}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1631,7 +1679,7 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={confirmRescheduleRepair}
                 disabled={!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy}
               >
-                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : 'Xác nhận lịch mới'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.photoMenuCancel} onPress={() => setRescheduleRepairOpen(false)}>
                 <Text style={s.photoMenuCancelText}>Đóng</Text>
@@ -1650,15 +1698,15 @@ export const TicketDetailScreen: React.FC = () => {
             <Pressable style={s.photoMenuCard} onPress={() => {}}>
               <Text style={s.photoMenuTitle}>Thêm ảnh/video</Text>
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
-                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+                <IconText icon="camera" gap={8} style={s.photoMenuOptionText}>Chụp ảnh</IconText>
               </TouchableOpacity>
               {Platform.OS !== 'web' && (
                 <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
-                  <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+                  <IconText icon="video" gap={8} style={s.photoMenuOptionText}>Quay video</IconText>
                 </TouchableOpacity>
               )}
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
-                <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+                <IconText icon="images" gap={8} style={s.photoMenuOptionText}>Chọn từ thư viện</IconText>
               </TouchableOpacity>
               <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
                 <Text style={s.photoMenuCancelText}>Đóng</Text>
@@ -1679,12 +1727,12 @@ export const TicketDetailScreen: React.FC = () => {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backIcon}>‹</Text>
+            <Icon name="back" size={28} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Bắt đầu sửa chữa</Text>
         </View>
         <View style={arrivalGateStyles.container}>
-          <Text style={arrivalGateStyles.emoji}>🔧</Text>
+          <Icon name="wrench" size={44} color={Colors.primary} strokeWidth={1.5} style={arrivalGateStyles.icon} />
           <Text style={arrivalGateStyles.title}>{ticket.title}</Text>
           <Text style={arrivalGateStyles.meta}>{ticket.ticketCode} · {ticket.roomName}</Text>
           <Text style={arrivalGateStyles.appointment}>
@@ -1701,7 +1749,7 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={() => setStartRepairScanOpen(true)}
                 disabled={startRepairBusy}
               >
-                <Text style={arrivalGateStyles.btnText}>📷 Quét QR bắt đầu sửa</Text>
+                <IconText icon="scan-qr" style={arrivalGateStyles.btnText}>Quét QR bắt đầu sửa</IconText>
               </TouchableOpacity>
             </>
           ) : (
@@ -1711,7 +1759,7 @@ export const TicketDetailScreen: React.FC = () => {
               </Text>
               <TouchableOpacity style={arrivalGateStyles.btn} onPress={doStartRepair} disabled={startRepairBusy}>
                 <Text style={arrivalGateStyles.btnText}>
-                  {startRepairBusy ? 'Đang xác nhận...' : '✅ Bắt đầu sửa'}
+                  {startRepairBusy ? 'Đang xác nhận...' : 'Bắt đầu sửa'}
                 </Text>
               </TouchableOpacity>
             </>
@@ -1719,11 +1767,11 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg }}>
             {ticket.repairAppointmentAt && isBeforeAppointmentDay(ticket.repairAppointmentAt) && (
               <TouchableOpacity style={s.reviewBtn} onPress={openRescheduleRepair}>
-                <Text style={s.reviewBtnText}>🗓 Đổi lịch sửa</Text>
+                <IconText icon="calendar" gap={5} style={s.reviewBtnText}>Đổi lịch sửa</IconText>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={s.reviewBtn} onPress={handleCancel}>
-              <Text style={[s.reviewBtnText, { color: '#DC2626' }]}>✕ Huỷ yêu cầu</Text>
+              <IconText icon="close" gap={5} style={[s.reviewBtnText, { color: '#DC2626' }]}>Huỷ yêu cầu</IconText>
             </TouchableOpacity>
           </View>
         </View>
@@ -1751,7 +1799,7 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={confirmRescheduleRepair}
                 disabled={!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy}
               >
-                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : 'Xác nhận lịch mới'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.photoMenuCancel} onPress={() => setRescheduleRepairOpen(false)}>
                 <Text style={s.photoMenuCancelText}>Đóng</Text>
@@ -1774,14 +1822,14 @@ export const TicketDetailScreen: React.FC = () => {
       {/* ── Header ──────────────────────────────────────────────────── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backIcon}>‹</Text>
+          <Icon name="back" size={28} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerCode}>{ticket.ticketCode}</Text>
           <Text style={s.headerTitle} numberOfLines={1}>{ticket.title}</Text>
         </View>
         <View style={[s.statusPill, { backgroundColor: cfg.bg }]}>
-          <Text style={s.statusPillIcon}>{cfg.icon}</Text>
+          <Icon name={cfg.icon} size={11} color={cfg.color} />
           <Text style={[s.statusPillText, { color: cfg.color }]}>{cfg.label}</Text>
         </View>
       </View>
@@ -1791,30 +1839,33 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Badges (category/priority ẩn khi chưa duyệt — manager gán lúc duyệt) ── */}
         <View style={s.badgesRow}>
           {priorityCfg && (
-            <View style={[s.badge, { backgroundColor: priorityCfg.bg }]}>
+            <View style={[s.badge, s.badgeRow, { backgroundColor: priorityCfg.bg }]}>
+              <Dot color={priorityCfg.color} size={6} />
               <Text style={[s.badgeText, { color: priorityCfg.color }]}>{priorityCfg.label}</Text>
             </View>
           )}
           {catCfg ? (
             <View style={s.catBadge}>
-              <Text style={s.catBadgeText}>{catCfg.icon} {catCfg.label}</Text>
+              <IconText icon={catCfg.icon} gap={4} iconSize={12} style={s.catBadgeText}>{catCfg.label}</IconText>
             </View>
           ) : (
             <View style={s.catBadge}>
-              <Text style={s.catBadgeText}>🏷 Chưa phân loại</Text>
+              <IconText icon="tag" gap={4} iconSize={12} style={s.catBadgeText}>Chưa phân loại</IconText>
             </View>
           )}
           <View style={[s.badge, { backgroundColor: Colors.background }]}>
-            <Text style={[s.badgeText, { color: Colors.textSecondary }]}>🏢 {ticket.propertyName}</Text>
+            <IconText icon="building" gap={4} iconSize={12} style={[s.badgeText, { color: Colors.textSecondary }]}>
+              {ticket.propertyName}
+            </IconText>
           </View>
         </View>
 
         {/* ── Công ty trả hộ (companyAbsorbedFault, 16/09/2026 — immutable một khi true) ── */}
         {ticket.companyAbsorbedFault && (
           <View style={[s.replaceAlert, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
-            <Text style={[s.replaceAlertText, { color: '#DC2626', fontWeight: '700' }]}>
-              ⚠️ Khách từ chối trả — công ty đã trả hộ
-            </Text>
+            <IconText icon="flag" style={[s.replaceAlertText, { color: '#DC2626', fontWeight: '700' }]}>
+              Khách từ chối trả — công ty đã trả hộ
+            </IconText>
             {!!ticket.companyAbsorbedNote && (
               <Text style={[s.replaceAlertText, { marginTop: 4 }]}>{ticket.companyAbsorbedNote}</Text>
             )}
@@ -1866,35 +1917,39 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Cảnh báo vòng đời thiết bị ───────────────────────────── */}
         {!!repairCount && repairCount >= EQUIPMENT_REPLACE_SUGGEST_COUNT && (
           <View style={s.replaceAlert}>
-            <Text style={s.replaceAlertText}>
-              ⚠️ Thiết bị này đã sửa {repairCount} lần — cân nhắc <Text style={{ fontWeight: '800' }}>thay mới</Text> thay vì sửa tiếp.
-            </Text>
+            <IconText icon="warning" multiline style={s.replaceAlertText}>
+              Thiết bị này đã sửa {repairCount} lần — cân nhắc <Text style={{ fontWeight: '800' }}>thay mới</Text> thay vì sửa tiếp.
+            </IconText>
           </View>
         )}
 
         {/* ── Thông tin thiết bị (BE 21/09/2026: snapshot trên phiếu, xem được không cần quét QR) ── */}
         {!!ticket.equipment && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🧰 Thông tin thiết bị</Text>
+            <Text style={s.cardSectionTitle}>Thông tin thiết bị</Text>
             <Text style={s.descText}>
               {ticket.equipment.equipmentName || ticket.equipment.catalogName || ticket.equipmentName || `#${ticket.equipment.id}`}
               {ticket.equipment.roomNumber ? ` · Phòng ${ticket.equipment.roomNumber}` : ''}
             </Text>
             <View style={s.sectionDivider} />
-            <Text style={s.descText}>🔧 Đã bảo trì: {ticket.equipment.maintenanceCount ?? 0} lần</Text>
+            <IconText icon="wrench" iconColor={Colors.textMuted} gap={8} multiline style={s.descText}>
+              Đã bảo trì: {ticket.equipment.maintenanceCount ?? 0} lần
+            </IconText>
             {!!ticket.equipment.purchasedAt && (
-              <Text style={s.descText}>🛒 Ngày mua / lắp: {ticket.equipment.purchasedAt.slice(0, 10)}</Text>
+              <IconText icon="cart" iconColor={Colors.textMuted} gap={8} multiline style={s.descText}>
+                Ngày mua / lắp: {ticket.equipment.purchasedAt.slice(0, 10)}
+              </IconText>
             )}
             {!!ticket.equipment.remainingWarrantyLabel && (
-              <Text style={s.descText}>
-                🛡 Bảo hành: {ticket.equipment.remainingWarrantyLabel}
+              <IconText icon="shield" iconColor={Colors.textMuted} gap={8} multiline style={s.descText}>
+                Bảo hành: {ticket.equipment.remainingWarrantyLabel}
                 {ticket.equipment.warrantyMonths ? ` (thời hạn ${ticket.equipment.warrantyMonths} tháng)` : ''}
-              </Text>
+              </IconText>
             )}
             {ticket.equipment.remainingDepreciationAmount != null && (
-              <Text style={s.descText}>
-                💰 Khấu hao / giá trị đền còn lại: {fmt(ticket.equipment.remainingDepreciationAmount)}
-              </Text>
+              <IconText icon="coins" iconColor={Colors.textMuted} gap={8} multiline style={s.descText}>
+                Khấu hao / giá trị đền còn lại: {fmt(ticket.equipment.remainingDepreciationAmount)}
+              </IconText>
             )}
           </View>
         )}
@@ -1902,7 +1957,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Ảnh sau sửa chữa + Ghi chú (gộp khi đang có thể báo sửa xong) ── */}
         {canComplete && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
+            <Text style={s.cardSectionTitle}>Ảnh sau sửa chữa</Text>
             <PhotoEvidenceRow
               type="after" urls={ticket.afterImages} photos={photos}
               onAdd={() => setPhotoMenuFor('after')}
@@ -1925,7 +1980,7 @@ export const TicketDetailScreen: React.FC = () => {
         )}
         {!canComplete && (ticket.afterImages?.length ?? 0) > 0 && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
+            <Text style={s.cardSectionTitle}>Ảnh sau sửa chữa</Text>
             <PhotoEvidenceRow type="after" urls={ticket.afterImages} photos={photos} onAdd={() => {}} disabled
               onView={(uris, i) => setLightbox({ uris, index: i })}
               onViewVideo={(url) => setVideoPreviewUrl(url)} />
@@ -1940,7 +1995,7 @@ export const TicketDetailScreen: React.FC = () => {
              trùng, xem canComplete/handleComplete) ── */}
         {canComplete && !ticket.chargeInvoiceId && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+            <Text style={s.cardSectionTitle}>Hoá đơn sửa chữa</Text>
             <PhotoEvidenceRow
               type="invoice" urls={ticket.invoiceImages} photos={photos}
               onAdd={() => setPhotoMenuFor('invoice')}
@@ -1984,14 +2039,18 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={() => setChargeToTenant(false)}
                 activeOpacity={0.75}
               >
-                <Text style={[s.payChoiceText, !chargeToTenant && s.payChoiceTextActive]}>🏢 Công ty trả</Text>
+                <IconText icon="building" gap={5} style={[s.payChoiceText, !chargeToTenant && s.payChoiceTextActive]}>
+                  Công ty trả
+                </IconText>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.payChoiceBtn, chargeToTenant && s.payChoiceBtnActive]}
                 onPress={() => setChargeToTenant(true)}
                 activeOpacity={0.75}
               >
-                <Text style={[s.payChoiceText, chargeToTenant && s.payChoiceTextActive]}>🧑 Khách trả</Text>
+                <IconText icon="user" gap={5} style={[s.payChoiceText, chargeToTenant && s.payChoiceTextActive]}>
+                  Khách trả
+                </IconText>
               </TouchableOpacity>
             </View>
             {chargeToTenant && (
@@ -2010,7 +2069,7 @@ export const TicketDetailScreen: React.FC = () => {
             để manager biết, không hỏi lại. */}
         {canComplete && replacementDecided && (
           <View style={[s.card, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
-            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⚠️ Thiết bị thay mới — đã đền bù</Text>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Thiết bị thay mới — đã đền bù</Text>
             <Text style={s.descText}>
               Tiền đền bù thay thiết bị {fmt(ticket.estimatedDamageAmount)} (chốt lúc chẩn đoán{ticket.status === 'tenant_fault' ? ', hoá đơn lập khi hoàn tất — khách có 5 ngày để thanh toán' : ''}).
               Bấm "Báo sửa xong" sẽ tự cập nhật lại thiết bị.
@@ -2027,9 +2086,9 @@ export const TicketDetailScreen: React.FC = () => {
               activeOpacity={0.75}
             >
               <View style={[s.checkbox, needsReplacement && s.checkboxChecked]}>
-                {needsReplacement && <Text style={s.checkboxMark}>✓</Text>}
+                {needsReplacement && <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />}
               </View>
-              <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
+              <Text style={s.cardSectionTitle}>Thiết bị hỏng hoàn toàn — cần thay mới</Text>
             </TouchableOpacity>
             {/* Số tiền đền bù chỉ có ý nghĩa khi THU PHÍ KHÁCH — công ty trả thì không
                 cần biết số này, chỉ cần đánh dấu thay mới + lưu hoá đơn (07/09/2026). */}
@@ -2063,7 +2122,7 @@ export const TicketDetailScreen: React.FC = () => {
 
         {!canComplete && (ticket.invoiceImages?.length ?? 0) > 0 && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+            <Text style={s.cardSectionTitle}>Hoá đơn sửa chữa</Text>
             <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled
               onView={(uris, i) => setLightbox({ uris, index: i })} allowVideo={false} />
             {ticket.invoiceAmount != null && (
@@ -2078,7 +2137,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Lỗi do khách (TENANT_FAULT/PENDING_TENANT_REPAIR/OUTSTANDING_DAMAGE) ── */}
         {['tenant_fault', 'pending_tenant_repair', 'outstanding_damage'].includes(ticket.status) && (
           <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
-            <Text style={s.cardSectionTitle}>⚠️ Lỗi do khách</Text>
+            <Text style={s.cardSectionTitle}>Lỗi do khách</Text>
             <Text style={s.descText}>{ticket.faultReason || 'Không có ghi chú.'}</Text>
             {(ticket.faultEvidenceImages?.length ?? 0) > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
@@ -2091,8 +2150,8 @@ export const TicketDetailScreen: React.FC = () => {
                         : setLightbox({ uris: ticket.faultEvidenceImages!, index: i })}>
                       {isVideo ? (
                         <View style={[s.rejectImage, s.videoRejectTile]}>
-                          <Text style={{ fontSize: 22 }}>🎬</Text>
-                          <Text style={s.videoRejectTileText}>▶ Xem video</Text>
+                          <Icon name="play-circle" size={24} color={Colors.white} strokeWidth={1.75} />
+                          <Text style={s.videoRejectTileText}>Xem video</Text>
                         </View>
                       ) : (
                         <Image source={{ uri }} style={s.rejectImage} />
@@ -2105,15 +2164,24 @@ export const TicketDetailScreen: React.FC = () => {
             {/* Phiếu gửi qua report-fault (luồng mới) — faultResolutionPath luôn null. */}
             {ticket.status === 'tenant_fault' && !ticket.faultResolutionPath && (
               !ticket.adminReviewedAt ? (
-                <Text style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}>
-                  ⏳ Đang chờ admin duyệt trên web.
-                </Text>
+                <IconText
+                  icon="hourglass"
+                  iconColor={Colors.warning}
+                  style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}
+                >
+                  Đang chờ admin duyệt trên web.
+                </IconText>
               ) : (
-                <Text style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}>
-                  {ticket.adminApproved ? '✅ Admin đã duyệt' : '❌ Admin không duyệt'}
+                <IconText
+                  icon={ticket.adminApproved ? 'success' : 'error'}
+                  iconColor={ticket.adminApproved ? Colors.success : Colors.error}
+                  multiline
+                  style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}
+                >
+                  {ticket.adminApproved ? 'Admin đã duyệt' : 'Admin không duyệt'}
                   {ticket.adminReviewedByName ? ` — ${ticket.adminReviewedByName}` : ''}
                   {ticket.adminReviewNote ? `: ${ticket.adminReviewNote}` : ''}
-                </Text>
+                </IconText>
               )
             )}
             {ticket.status === 'pending_tenant_repair' && (
@@ -2131,7 +2199,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Đã sửa/bàn giao xong, chờ khách trả tiền (BE 21/09/2026) ── */}
         {ticket.status === 'waiting_payment' && (
           <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
-            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>💳 Đã sửa xong — chờ khách thanh toán</Text>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Đã sửa xong — chờ khách thanh toán</Text>
             <Text style={s.pickHint}>
               Việc sửa/bàn giao đã hoàn tất. Phiếu tự đóng ngay khi khách thanh toán hoá đơn (hạn 5 ngày kể từ lúc lập, không tính phí trễ hạn).
               Quá hạn, hoá đơn chuyển quá hạn và quản lý được quyền đề nghị chấm dứt hợp đồng (xem "Việc của tôi") — phiếu vẫn giữ "Chờ thanh toán" tới khi khách trả.
@@ -2142,7 +2210,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Đang chờ khách thanh toán hoá đơn thiệt hại (charge, 15/09/2026) ── */}
         {hasUnpaidCharge && ticket.issuedInvoice && (
           <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
-            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Hoá đơn đã lập — chờ khách thanh toán</Text>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Hoá đơn đã lập — chờ khách thanh toán</Text>
             <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
               {fmt(ticket.issuedInvoice.grandTotal)}
             </Text>
@@ -2176,14 +2244,18 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Bắt đầu xử lý: quét QR thiết bị (BE 21/09/2026 — xem phiếu không cần quét) ── */}
         {arrivalGateActive && (
           <View style={[s.card, { borderColor: Colors.primary, borderWidth: 1.5 }]}>
-            <Text style={s.cardSectionTitle}>📍 Bắt đầu xử lý tại hiện trường</Text>
+            <Text style={s.cardSectionTitle}>Bắt đầu xử lý tại hiện trường</Text>
             <Text style={s.pickHint}>
               Lịch hẹn: {formatDateTime(ticket.visitAppointmentAt)}
             </Text>
             {arrivalNeedsRescan && (
-              <Text style={[s.pickHint, { color: '#B45309', fontWeight: '700', marginTop: Spacing.sm }]}>
-                ⏱ Đã quá 30 phút kể từ lúc xác nhận có mặt mà chưa chẩn đoán xong — quét lại để tiếp tục.
-              </Text>
+              <IconText
+                icon="timer"
+                multiline
+                style={[s.pickHint, { color: '#B45309', fontWeight: '700', marginTop: Spacing.sm }]}
+              >
+                Đã quá 30 phút kể từ lúc xác nhận có mặt mà chưa chẩn đoán xong — quét lại để tiếp tục.
+              </IconText>
             )}
             {realEquipmentId ? (
               <>
@@ -2196,7 +2268,7 @@ export const TicketDetailScreen: React.FC = () => {
                   onPress={() => setArrivalScanOpen(true)}
                   disabled={arrivalBusy}
                 >
-                  <Text style={s.advanceBtnText}>📷 Quét QR bắt đầu xử lý</Text>
+                  <IconText icon="scan-qr" style={s.advanceBtnText}>Quét QR bắt đầu xử lý</IconText>
                 </TouchableOpacity>
               </>
             ) : (
@@ -2209,7 +2281,7 @@ export const TicketDetailScreen: React.FC = () => {
                   onPress={() => { void doConfirmArrival(); }}
                   disabled={arrivalBusy}
                 >
-                  <Text style={s.advanceBtnText}>{arrivalBusy ? 'Đang xác nhận...' : '✅ Xác nhận đã đến'}</Text>
+                  <Text style={s.advanceBtnText}>{arrivalBusy ? 'Đang xác nhận...' : 'Xác nhận đã đến'}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -2233,14 +2305,14 @@ export const TicketDetailScreen: React.FC = () => {
               onPress={() => openTopLevelForm('diagnose')}
               disabled={busy}
             >
-              <Text style={s.advanceBtnText}>🔧 Sửa được ngay</Text>
+              <IconText icon="wrench" style={s.advanceBtnText}>Sửa được ngay</IconText>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.advanceBtn, { backgroundColor: '#0369A1', marginBottom: 0 }]}
               onPress={() => openTopLevelForm('inspection')}
               disabled={busy}
             >
-              <Text style={s.advanceBtnText}>📦 Mang đi kiểm tra thêm</Text>
+              <IconText icon="package" style={s.advanceBtnText}>Mang đi kiểm tra thêm</IconText>
             </TouchableOpacity>
           </View>
         )}
@@ -2256,7 +2328,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── "Mang đi kiểm tra thêm" (sendForInspection()) ─────────── */}
         {ticket.status === 'open' && !arrivalGateActive && inspectionFormOpen && (
           <View style={[s.card, { borderColor: '#0369A1', borderWidth: 1.5 }]}>
-            <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
+            <Text style={s.cardSectionTitle}>Mang thiết bị đi kiểm tra thêm</Text>
             <Text style={s.pickHint}>
               Chưa xác định được nguyên nhân — phiếu chuyển "Đã đặt lịch sửa". Khi thợ báo kết quả, quay lại phiếu
               để nhập chẩn đoán & báo giá.
@@ -2285,10 +2357,10 @@ export const TicketDetailScreen: React.FC = () => {
               onPress={submitSendForInspection}
               disabled={sendingForInspection}
             >
-              <Text style={s.advanceBtnText}>{sendingForInspection ? 'Đang gửi...' : '📦 Xác nhận mang đi kiểm tra'}</Text>
+              <Text style={s.advanceBtnText}>{sendingForInspection ? 'Đang gửi...' : 'Xác nhận mang đi kiểm tra'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setInspectionFormOpen(false)}>
-              <Text style={[{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+              <IconText icon="arrow-left" gap={4} style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>Quay lại</IconText>
             </TouchableOpacity>
           </View>
         )}
@@ -2313,17 +2385,17 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Chờ khách tự sửa — chưa nộp ảnh ──────────────────────── */}
         {ticket.status === 'pending_tenant_repair' && !tenantSubmittedSelfRepair && (
           <View style={[s.card, { backgroundColor: Colors.infoLight }]}>
-            <Text style={[s.descText, { color: Colors.info }]}>
-              ⏳ Đang chờ khách tự sửa và nộp ảnh
+            <IconText icon="hourglass" multiline style={[s.descText, { color: Colors.info }]}>
+              Đang chờ khách tự sửa và nộp ảnh
               {selfRepairRemainingDays != null ? ` (còn ${Math.max(0, selfRepairRemainingDays)} ngày)` : ''}.
-            </Text>
+            </IconText>
           </View>
         )}
 
         {/* ── Khách đã nộp ảnh tự sửa — verify-repair ──────────────── */}
         {ticket.status === 'pending_tenant_repair' && tenantSubmittedSelfRepair && (
           <View style={[s.card, { borderColor: '#F97316', borderWidth: 1.5 }]}>
-            <Text style={s.cardSectionTitle}>🛠 Khách đã nộp ảnh tự sửa</Text>
+            <Text style={s.cardSectionTitle}>Khách đã nộp ảnh tự sửa</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {(ticket.selfRepairImages ?? []).map((uri, i) => {
                 const isVideo = isVideoUrl(uri);
@@ -2334,8 +2406,8 @@ export const TicketDetailScreen: React.FC = () => {
                       : setLightbox({ uris: ticket.selfRepairImages ?? [], index: i })}>
                     {isVideo ? (
                       <View style={[s.rejectImage, s.videoRejectTile]}>
-                        <Text style={{ fontSize: 22 }}>🎬</Text>
-                        <Text style={s.videoRejectTileText}>▶ Xem video</Text>
+                        <Icon name="play-circle" size={24} color={Colors.white} strokeWidth={1.75} />
+                        <Text style={s.videoRejectTileText}>Xem video</Text>
                       </View>
                     ) : (
                       <Image source={{ uri }} style={s.rejectImage} />
@@ -2358,14 +2430,14 @@ export const TicketDetailScreen: React.FC = () => {
                 onPress={() => submitVerifyRepair(true)}
                 disabled={verifying}
               >
-                <Text style={[s.reviewBtnText, { color: Colors.white }]}>✅ Đạt — đóng phiếu</Text>
+                <IconText icon="check" gap={5} style={[s.reviewBtnText, { color: Colors.white }]}>Đạt — đóng phiếu</IconText>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.reviewBtn, { backgroundColor: '#FEF2F2', borderColor: '#DC2626' }]}
                 onPress={() => submitVerifyRepair(false)}
                 disabled={verifying}
               >
-                <Text style={[s.reviewBtnText, { color: '#DC2626' }]}>❌ Không đạt</Text>
+                <IconText icon="close" gap={5} style={[s.reviewBtnText, { color: '#DC2626' }]}>Không đạt</IconText>
               </TouchableOpacity>
             </View>
           </View>
@@ -2374,9 +2446,9 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Chờ checkout trừ cọc ──────────────────────────────────── */}
         {ticket.status === 'outstanding_damage' && (
           <View style={[s.card, { backgroundColor: '#FEF2F2' }]}>
-            <Text style={[s.descText, { color: '#B91C1C' }]}>
-              💸 Đã ghi nhận thiệt hại — sẽ được trừ vào tiền cọc khi khách trả phòng.
-            </Text>
+            <IconText icon="deposit" multiline style={[s.descText, { color: '#B91C1C' }]}>
+              Đã ghi nhận thiệt hại — sẽ được trừ vào tiền cọc khi khách trả phòng.
+            </IconText>
           </View>
         )}
 
@@ -2396,7 +2468,7 @@ export const TicketDetailScreen: React.FC = () => {
             disabled={busy}
           >
             <Text style={s.advanceBtnText}>
-              🛠 Báo sửa xong{
+              Báo sửa xong{
                 !hasAfterPhoto ? ' (cần ảnh AFTER)'
                   : (!ticket.chargeInvoiceId && !hasInvoicePhoto) ? ' (cần ảnh hoá đơn)' : ''
               }
@@ -2429,15 +2501,15 @@ export const TicketDetailScreen: React.FC = () => {
           <Pressable style={s.photoMenuCard} onPress={() => {}}>
             <Text style={s.photoMenuTitle}>{photoMenuFor === 'invoice' ? 'Thêm ảnh' : 'Thêm ảnh/video'}</Text>
             <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
-              <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+              <IconText icon="camera" gap={8} style={s.photoMenuOptionText}>Chụp ảnh</IconText>
             </TouchableOpacity>
             {photoMenuFor !== 'invoice' && Platform.OS !== 'web' && (
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
-                <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+                <IconText icon="video" gap={8} style={s.photoMenuOptionText}>Quay video</IconText>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
-              <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+              <IconText icon="images" gap={8} style={s.photoMenuOptionText}>Chọn từ thư viện</IconText>
             </TouchableOpacity>
             <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
               <Text style={s.photoMenuCancelText}>Đóng</Text>
@@ -2453,7 +2525,7 @@ export const TicketDetailScreen: React.FC = () => {
 
 const arrivalGateStyles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
-  emoji: { fontSize: 48, marginBottom: Spacing.base },
+  icon: { marginBottom: Spacing.base },
   title: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center' },
   meta: { fontSize: 13, color: Colors.textMuted, marginTop: 4 },
   appointment: { fontSize: 15, fontWeight: '700', color: Colors.primary, marginTop: Spacing.md },
@@ -2475,15 +2547,16 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderColor: Colors.divider,
   },
   backBtn:        { padding: 4 },
-  backIcon:       { fontSize: 30, color: Colors.primary, fontWeight: '300', lineHeight: 34 },
+
   headerCode:     { fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 0.5 },
   headerTitle:    { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   statusPill:     { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
-  statusPillIcon: { fontSize: 11 },
+
   statusPillText: { fontSize: 10, fontWeight: '700' },
 
   badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
   badge:     { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
+  badgeRow:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   catBadge:  { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
   catBadgeText: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary },
@@ -2529,7 +2602,7 @@ const s = StyleSheet.create({
   },
   dropdownBtnText:        { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   dropdownBtnPlaceholder: { color: Colors.textMuted, fontWeight: '400' },
-  dropdownChevron:        { fontSize: 11, color: Colors.textMuted },
+
   dropdownList: {
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: BorderRadius.md,
     marginTop: Spacing.xs, overflow: 'hidden', backgroundColor: Colors.white,
@@ -2563,7 +2636,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: '#DC2626', borderColor: '#DC2626' },
-  checkboxMark: { color: Colors.white, fontSize: 13, fontWeight: '800' },
+
 
   advanceBtn:    { backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, paddingVertical: 14, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md },
   advanceBtnText:{ fontSize: 15, fontWeight: '700', color: Colors.white },

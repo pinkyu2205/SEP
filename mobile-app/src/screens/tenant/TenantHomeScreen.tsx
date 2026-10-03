@@ -17,13 +17,14 @@ import { checkoutMeta } from '@/constants';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 import { TenureCard } from '@/components/tenant';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
-const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
-  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
+const TYPE_CFG: Record<InvoiceType, { label: string; icon: IconName; color: string; bg: string }> = {
+  rent:        { label: 'Tiền phòng', icon: 'home',     color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Điện',       icon: 'electric', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Nước',       icon: 'water',    color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí bảo trì', icon: 'wrench',  color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: 'deposit',  color: '#059669', bg: '#ECFDF5' },
 };
 
 /**
@@ -45,10 +46,10 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
  * Tra cứu lại về sau (đối chiếu chỉ số gốc trước lúc trả phòng) vẫn còn nguyên đường:
  * màn CHI TIẾT HỢP ĐỒNG ở tab Hợp đồng cũng nạp và hiển thị đúng khối `handover` này.
  */
-const QUICK_ACTIONS = [
-  { emoji: '📱', label: 'Thiết bị',   route: 'RoomEquipment',  color: '#0EA5E9'      },
-  { emoji: '📷', label: 'Quét QR',    route: 'Scan',           color: Colors.accent  },
-  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory', color: Colors.success },
+const QUICK_ACTIONS: { icon: IconName; label: string; route: string; color: string }[] = [
+  { icon: 'package', label: 'Thiết bị',   route: 'RoomEquipment',  color: '#0EA5E9'      },
+  { icon: 'scan-qr', label: 'Quét QR',    route: 'Scan',           color: Colors.accent  },
+  { icon: 'card',    label: 'Lịch sử TT', route: 'PaymentHistory', color: Colors.success },
 ];
 
 // ── Component ──────────────────────────────────────────────
@@ -277,13 +278,13 @@ export const TenantHomeScreen: React.FC = () => {
   const contractExpiringSoon = hasRoom && data.contract.daysLeft <= 60;
 
   const alerts = [
-    hasOverdue       && { id: 'overdue',  icon: '🚨', text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
-    hasMaintenance    && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
+    hasOverdue       && { id: 'overdue',  icon: 'alert' as IconName, text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
+    hasMaintenance    && { id: 'maint',    icon: 'wrench' as IconName, text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
     // Chỉ 60→31 ngày: từ ngày thứ 30 trở đi TenureCard ở đầu màn tiếp quản, nói
     // rõ hơn (còn mấy ngày + xin gia hạn được không). Để cả hai là lặp.
     contractExpiringSoon && data.contract.daysLeft > 30
-      && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`, route: 'TenantContracts', color: Colors.info },
-  ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
+      && { id: 'contract', icon: 'contract' as IconName, text: `Hợp đồng còn ${data.contract.daysLeft} ngày`, route: 'TenantContracts', color: Colors.info },
+  ].filter(Boolean) as { id: string; icon: IconName; text: string; route: string; color: string }[];
 
   if (loading) {
     return (
@@ -313,12 +314,12 @@ export const TenantHomeScreen: React.FC = () => {
             nằm trên cùng — vừa chìm vừa cao gấp đôi header của manager.
             Ngày lấy theo GIỜ SERVER, không phải đồng hồ máy. */}
         <View style={styles.header}>
-          <Text style={styles.headerName} numberOfLines={1}>Xin chào, {firstName} 👋</Text>
+          <Text style={styles.headerName} numberOfLines={1}>Xin chào, {firstName}</Text>
 
           <View style={styles.headerRight}>
             <Text style={styles.headerDate}>{todayStr}</Text>
             <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('TenantNotifications')}>
-              <Text style={styles.notifIcon}>🔔</Text>
+              <Icon name="bell" size={18} color={Colors.textSecondary} />
               {(realUnread ?? data.unreadNotifications) > 0 && (
                 <View style={styles.notifBadge}>
                   <Text style={styles.notifBadgeText}>
@@ -333,19 +334,19 @@ export const TenantHomeScreen: React.FC = () => {
         {/* Picker "Nhà đang thuê" — chỉ hiện khi account có ≥2 HĐ ACTIVE */}
         {hasMultipleContracts && (
           <TouchableOpacity style={styles.contractPickerBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.8}>
-            <Text style={styles.contractPickerLabel}>🏠 Nhà đang xem</Text>
+            <IconText icon="home" gap={4} style={styles.contractPickerLabel}>Nhà đang xem</IconText>
             <Text style={styles.contractPickerValue} numberOfLines={1}>
               {dash?.contract?.propertyName ?? data.room.name}
               {dash?.contract?.roomNumber ? ` · ${dash.contract.roomNumber}` : ''}
             </Text>
-            <Text style={styles.contractPickerChevron}>▾</Text>
+            <Icon name="chevron-down" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
 
         {!hasRoom ? (
           dashError ? (
             <View style={styles.emptyRoomCard}>
-              <Text style={styles.emptyRoomIcon}>⚠️</Text>
+              <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} style={styles.emptyRoomIcon} />
               <Text style={styles.emptyRoomTitle}>Không tải được dữ liệu</Text>
               <Text style={styles.emptyRoomText}>
                 Có lỗi khi tải thông tin phòng/hợp đồng. Vui lòng kiểm tra mạng và thử lại.
@@ -356,7 +357,7 @@ export const TenantHomeScreen: React.FC = () => {
             </View>
           ) : (
             <View style={styles.emptyRoomCard}>
-              <Text style={styles.emptyRoomIcon}>🏠</Text>
+              <Icon name="home" size={40} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyRoomIcon} />
               <Text style={styles.emptyRoomTitle}>Bạn chưa có phòng đang thuê</Text>
               <Text style={styles.emptyRoomText}>
                 Khi hợp đồng của bạn có hiệu lực, thông tin phòng và tòa nhà sẽ hiển thị tại đây.
@@ -385,7 +386,7 @@ export const TenantHomeScreen: React.FC = () => {
           {showBuildingName && (
             <Text style={styles.heroBuilding} numberOfLines={1}>{buildingInfo.name}</Text>
           )}
-          <Text style={styles.heroAddress} numberOfLines={2}>📍 {buildingInfo.address}</Text>
+          <IconText icon="location" multiline gap={4} style={styles.heroAddress} numberOfLines={2}>{buildingInfo.address}</IconText>
 
           {/* Số liệu phòng — nằm luôn trong hero, không tách card riêng nữa */}
           <View style={styles.heroStats}>
@@ -415,7 +416,7 @@ export const TenantHomeScreen: React.FC = () => {
             activeOpacity={0.7}
           >
             <Text style={styles.heroContractText} numberOfLines={1}>Hợp đồng {data.contract.code}</Text>
-            <Text style={styles.heroContractArrow}>›</Text>
+            <Icon name="chevron-right" size={18} color="rgba(255,255,255,0.75)" />
           </TouchableOpacity>
         </View>
 
@@ -430,7 +431,7 @@ export const TenantHomeScreen: React.FC = () => {
             onPress={() => navigation.navigate('InvoiceDetail', { invoice: onboardingBill })}
           >
             <View style={styles.onboardPaidHead}>
-              <Text style={styles.onboardPaidTitle}>✅ Đã thanh toán khi nhận phòng</Text>
+              <IconText icon="success" style={styles.onboardPaidTitle}>Đã thanh toán khi nhận phòng</IconText>
               <Text style={styles.onboardPaidTotal}>
                 {formatCurrency(onboardingBill.grandTotal)}
               </Text>
@@ -450,9 +451,9 @@ export const TenantHomeScreen: React.FC = () => {
               </Text>
             )}
             {!!onboardingBill.paidAt && (
-              <Text style={styles.onboardPaidAt}>
-                🕒 Ghi nhận {new Date(onboardingBill.paidAt).toLocaleString('vi-VN')}
-              </Text>
+              <IconText icon="clock" gap={4} style={styles.onboardPaidAt}>
+                Ghi nhận {new Date(onboardingBill.paidAt).toLocaleString('vi-VN')}
+              </IconText>
             )}
           </TouchableOpacity>
         )}
@@ -498,9 +499,9 @@ export const TenantHomeScreen: React.FC = () => {
                 style={[styles.alertPill, { borderColor: a.color + '40', backgroundColor: a.color + '0D' }]}
                 onPress={() => navigation.navigate(a.route)}
               >
-                <Text style={styles.alertPillIcon}>{a.icon}</Text>
+                <Icon name={a.icon} size={16} color={a.color} />
                 <Text style={[styles.alertPillText, { color: a.color }]}>{a.text}</Text>
-                <Text style={[styles.alertPillArrow, { color: a.color }]}>›</Text>
+                <Icon name="chevron-right" size={18} color={a.color} />
               </TouchableOpacity>
             ))}
           </View>
@@ -510,13 +511,13 @@ export const TenantHomeScreen: React.FC = () => {
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Hóa đơn</Text>
           <TouchableOpacity onPress={() => navigation.navigate('InvoiceList')}>
-            <Text style={styles.sectionLink}>Tất cả →</Text>
+            <IconText icon="chevron-right" trailing gap={2} style={styles.sectionLink}>Tất cả</IconText>
           </TouchableOpacity>
         </View>
 
         {displayBills.length === 0 ? (
           <View style={styles.allPaidCard}>
-            <Text style={styles.allPaidEmoji}>✅</Text>
+            <Icon name="success" size={22} color={Colors.success} />
             <Text style={styles.allPaidText}>Tất cả hóa đơn đã được thanh toán</Text>
           </View>
         ) : (
@@ -537,9 +538,9 @@ export const TenantHomeScreen: React.FC = () => {
                 <View style={styles.invCardHeader}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={[styles.invTypeBadge, { backgroundColor: tc.bg }]}>
-                      <Text style={[styles.invTypeBadgeText, { color: tc.color }]}>
-                        {tc.icon} {tc.label}
-                      </Text>
+                      <IconText icon={tc.icon} gap={4} iconSize={12} style={[styles.invTypeBadgeText, { color: tc.color }]}>
+                        {tc.label}
+                      </IconText>
                     </View>
                     {/* Hoá đơn onboard không thuộc kỳ nào → billMonthLabel trả null. */}
                     {!!billMonthLabel(bill) && (
@@ -558,10 +559,10 @@ export const TenantHomeScreen: React.FC = () => {
                 <Text style={styles.invRoom}>{bill.roomName} · {bill.propertyName}</Text>
 
                 {bill.invoiceType === 'electricity' && bill.kwhUsed !== undefined && (
-                  <Text style={styles.invDetail}>⚡ {bill.kwhUsed} kWh · {bill.billingPeriod}</Text>
+                  <IconText icon="electric" gap={4} style={styles.invDetail}>{bill.kwhUsed} kWh · {bill.billingPeriod}</IconText>
                 )}
                 {bill.invoiceType === 'water' && bill.m3Used !== undefined && (
-                  <Text style={styles.invDetail}>💧 {bill.m3Used} m³ · {bill.billingPeriod}</Text>
+                  <IconText icon="water" gap={4} style={styles.invDetail}>{bill.m3Used} m³ · {bill.billingPeriod}</IconText>
                 )}
 
                 <View style={styles.invAmountRow}>
@@ -580,7 +581,7 @@ export const TenantHomeScreen: React.FC = () => {
                     activeOpacity={0.85}
                   >
                     <Text style={styles.invPayBtnText}>
-                      {isOver ? '🚨 Thanh toán ngay' : '💳 Xem & Thanh toán'}
+                      {isOver ? 'Thanh toán ngay' : 'Xem & Thanh toán'}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -602,7 +603,7 @@ export const TenantHomeScreen: React.FC = () => {
               activeOpacity={0.75}
             >
               <View style={[styles.actionIconWrap, { backgroundColor: a.color + '1A' }]}>
-                <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                <Icon name={a.icon} size={20} color={a.color} />
               </View>
               <Text style={styles.actionLabel}>{a.label}</Text>
             </TouchableOpacity>
@@ -627,7 +628,7 @@ export const TenantHomeScreen: React.FC = () => {
             activeOpacity={0.75}
           >
             <View style={[styles.checkoutIconWrap, needsTenant && styles.checkoutIconWrapAlert]}>
-              <Text style={styles.checkoutEmoji}>{needsTenant ? '🔔' : '🚪'}</Text>
+              <Icon name={needsTenant ? 'bell' : 'door'} size={18} color={needsTenant ? '#B45309' : Colors.error} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.checkoutLabel}>Tiến trình trả phòng</Text>
@@ -645,7 +646,7 @@ export const TenantHomeScreen: React.FC = () => {
                 </Text>
               )}
             </View>
-            <Text style={[styles.checkoutChevron, needsTenant && styles.checkoutChevronAlert]}>›</Text>
+            <Icon name="chevron-right" size={20} color={needsTenant ? '#B45309' : Colors.textMuted} />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -654,7 +655,7 @@ export const TenantHomeScreen: React.FC = () => {
             activeOpacity={0.75}
           >
             <View style={styles.checkoutIconWrap}>
-              <Text style={styles.checkoutEmoji}>🚪</Text>
+              <Icon name="door" size={18} color={Colors.error} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.checkoutLabel}>Trả phòng</Text>
@@ -662,7 +663,7 @@ export const TenantHomeScreen: React.FC = () => {
                 Gửi yêu cầu để hẹn ngày kiểm phòng và hoàn cọc
               </Text>
             </View>
-            <Text style={styles.checkoutChevron}>›</Text>
+            <Icon name="chevron-right" size={20} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
 
@@ -688,7 +689,7 @@ export const TenantHomeScreen: React.FC = () => {
                     </Text>
                     <Text style={styles.pickerRowSub}>HĐ {c.code} · còn {c.daysLeft} ngày</Text>
                   </View>
-                  {active && <Text style={styles.pickerCheck}>✓</Text>}
+                  {active && <Icon name="check" size={18} color={Colors.primary} />}
                 </TouchableOpacity>
               );
             })}
@@ -713,7 +714,7 @@ const styles = StyleSheet.create({
   },
   contractPickerLabel: { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
   contractPickerValue: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
-  contractPickerChevron: { fontSize: 14, color: Colors.textMuted },
+
   pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   pickerSheet: {
     backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
@@ -727,7 +728,7 @@ const styles = StyleSheet.create({
   pickerRowActive: { backgroundColor: Colors.primaryBg, marginHorizontal: -Spacing.lg, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.md },
   pickerRowTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   pickerRowSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  pickerCheck: { fontSize: 16, fontWeight: '800', color: Colors.primary },
+
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   // Empty state (chưa có phòng/hợp đồng)
@@ -735,7 +736,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.xl,
     alignItems: 'center', marginTop: Spacing.md, marginBottom: Spacing.md, ...Shadow.sm,
   },
-  emptyRoomIcon: { fontSize: 40, marginBottom: Spacing.sm },
+  emptyRoomIcon: { marginBottom: Spacing.sm },
   emptyRoomTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.xs },
   emptyRoomText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
   retryBtn: { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
@@ -756,7 +757,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
-  notifIcon: { fontSize: 16 },
+
   notifBadge: {
     position: 'absolute', top: 4, right: 4, minWidth: 14, height: 14,
     borderRadius: 7, backgroundColor: Colors.error,
@@ -791,7 +792,7 @@ const styles = StyleSheet.create({
 
   heroContract: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
   heroContractText: { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
-  heroContractArrow: { fontSize: 18, fontWeight: '700', color: 'rgba(255,255,255,0.75)' },
+
 
   // ── Khoản thu lúc nhận phòng (tiền nhà tháng đầu + cọc) ──
   onboardPaidCard: {
@@ -833,9 +834,9 @@ const styles = StyleSheet.create({
   // Alerts
   alertsCol: { gap: Spacing.xs, marginBottom: Spacing.md },
   alertPill: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.sm, paddingVertical: 9, borderRadius: BorderRadius.lg, borderWidth: 1 },
-  alertPillIcon: { fontSize: 14 },
+
   alertPillText: { flex: 1, fontSize: 12, fontWeight: '600' },
-  alertPillArrow: { fontSize: 20, fontWeight: '400' },
+
 
   // ── Separate Invoice Cards ──
   sectionLink: { fontSize: 13, fontWeight: '700', color: Colors.primary },
@@ -844,7 +845,7 @@ const styles = StyleSheet.create({
     padding: Spacing.base, marginBottom: Spacing.md,
     alignItems: 'center', flexDirection: 'row', gap: Spacing.sm,
   },
-  allPaidEmoji: { fontSize: 22 },
+
   allPaidText: { fontSize: 14, fontWeight: '600', color: Colors.success },
   invCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
@@ -890,7 +891,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 6,
   },
-  actionEmoji: { fontSize: 20 },
+
   // Bản cũ để 9.5px vì 9 ô phải nhét vừa; còn 4 ô thì chữ đủ chỗ để đọc bình thường.
   actionLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, textAlign: 'center' },
 
@@ -908,10 +909,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: Colors.errorLight,
   },
-  checkoutEmoji: { fontSize: 17 },
+
   checkoutLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   checkoutHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-  checkoutChevron: { fontSize: 22, color: Colors.textMuted, marginTop: -2 },
+
 
   // ── Biến thể khi hồ sơ trả phòng ĐANG CHỜ KHÁCH ──
   // Dùng nền hổ phách chứ không phải đỏ: đây là việc cần làm, không phải cảnh báo hỏng hóc.
@@ -919,5 +920,5 @@ const styles = StyleSheet.create({
   checkoutRowAlert: { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' },
   checkoutIconWrapAlert: { backgroundColor: '#FEF3C7' },
   checkoutAlertText: { marginTop: 2, fontSize: 12, lineHeight: 17, fontWeight: '700', color: '#B45309' },
-  checkoutChevronAlert: { color: '#B45309' },
+
 });

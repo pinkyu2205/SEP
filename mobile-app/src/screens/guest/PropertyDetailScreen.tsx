@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, BorderRadius, Typography, Shadow } from '@/constants';
-import { PropertyCard, StickyContactBar } from '@/components/common';
+import { PropertyCard, StickyContactBar, Icon, IconText } from '@/components/common';
 import { searchService } from '@/services';
 import { PropertyListing, PropertyRoom } from '@/types';
 import { formatCurrency } from '@/utils/helpers';
@@ -154,7 +154,7 @@ const PhotoViewerModal: React.FC<PhotoViewerProps> = ({ visible, photos, initial
       <StatusBar hidden />
       <Animated.View style={[viewerStyles.overlay, { opacity: fadeAnim }]}>
         <TouchableOpacity style={viewerStyles.closeBtn} onPress={onClose} activeOpacity={0.8}>
-          <Text style={viewerStyles.closeTxt}>✕</Text>
+          <Icon name="close" size={20} color={Colors.white} />
         </TouchableOpacity>
         <View style={viewerStyles.countBadge}>
           <Text style={viewerStyles.countTxt}>{currentIndex + 1} / {photos.length}</Text>
@@ -192,7 +192,7 @@ const viewerStyles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center', justifyContent: 'center',
   },
-  closeTxt: { color: '#fff', fontSize: 18, fontWeight: '700' },
+
   countBadge: {
     position: 'absolute', top: 56, left: 20, zIndex: 10,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -243,7 +243,7 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
               <View style={sheetStyles.handleBar} />
               <View style={sheetStyles.header}>
                 <Text style={sheetStyles.roomName}>{room.name}</Text>
-                <Text style={sheetStyles.propertyName}>🏠 {propertyName}</Text>
+                <IconText icon="building" gap={5} iconColor={Colors.textMuted} style={sheetStyles.propertyName}>{propertyName}</IconText>
               </View>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={sheetStyles.photoScroll}>
@@ -256,28 +256,28 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
                   >
                     <Image source={{ uri: photo }} style={sheetStyles.photoImg} resizeMode="cover" />
                     <View style={sheetStyles.photoZoomHint}>
-                      <Text style={{ color: '#fff', fontSize: 10 }}>🔍</Text>
+                      <Icon name="expand" size={12} color={Colors.white} />
                     </View>
                   </TouchableOpacity>
                 )) : (
                   <View style={sheetStyles.photoCard}>
-                    <Text style={sheetStyles.photoIcon}>📷</Text>
+                    <Icon name="image" size={30} color={Colors.primaryLight} strokeWidth={1.5} />
                   </View>
                 )}
               </ScrollView>
 
             <View style={sheetStyles.infoRow}>
               <View style={sheetStyles.infoPill}>
-                <Text style={sheetStyles.infoPillIcon}>📐</Text>
+                <Icon name="area" size={14} color={Colors.textSecondary} />
                 <Text style={sheetStyles.infoPillText}>{room.area}m²</Text>
               </View>
               <View style={sheetStyles.infoPill}>
-                <Text style={sheetStyles.infoPillIcon}>🏢</Text>
+                <Icon name="layers" size={14} color={Colors.textSecondary} />
                 <Text style={sheetStyles.infoPillText}>Tầng {room.floor}</Text>
               </View>
               {room.price > 0 && (
                 <View style={[sheetStyles.infoPill, { backgroundColor: '#FEF2F2' }]}>
-                  <Text style={sheetStyles.infoPillIcon}>💰</Text>
+                  <Icon name="cash" size={14} color={Colors.error} />
                   <Text style={[sheetStyles.infoPillText, { color: Colors.error }]}>{formatCurrency(room.price)}</Text>
                 </View>
               )}
@@ -285,18 +285,18 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
 
             {room.description && (
               <View style={sheetStyles.section}>
-                <Text style={sheetStyles.sectionTitle}>📝 Mô tả</Text>
+                <Text style={sheetStyles.sectionTitle}>Mô tả</Text>
                 <Text style={sheetStyles.descText}>{room.description}</Text>
               </View>
             )}
 
             {room.equipments && room.equipments.length > 0 && (
               <View style={sheetStyles.section}>
-                <Text style={sheetStyles.sectionTitle}>🪑 Nội thất trong phòng</Text>
+                <Text style={sheetStyles.sectionTitle}>Nội thất trong phòng</Text>
                 <View style={sheetStyles.equipmentGrid}>
                   {room.equipments.map((eq, idx) => (
                     <View key={idx} style={sheetStyles.equipmentChip}>
-                      <Text style={sheetStyles.equipmentText}>✅ {eq}</Text>
+                      <IconText icon="check" gap={4} iconSize={13} iconColor={Colors.success} style={sheetStyles.equipmentText}>{eq}</IconText>
                     </View>
                   ))}
                 </View>
@@ -345,7 +345,7 @@ const sheetStyles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   photoImg: { width: '100%', height: '100%' },
-  photoIcon: { fontSize: 36 },
+
   photoZoomHint: {
     position: 'absolute', bottom: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -357,7 +357,7 @@ const sheetStyles = StyleSheet.create({
     backgroundColor: Colors.background, paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs, borderRadius: BorderRadius.full, gap: 4,
   },
-  infoPillIcon: { fontSize: 14 },
+
   infoPillText: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   section: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.md },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
@@ -397,12 +397,12 @@ const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
           <View style={[accordionStyles.dot, room.status === 'available' ? accordionStyles.dotGreen : accordionStyles.dotGray]} />
           <View>
             <Text style={accordionStyles.name}>{room.name}</Text>
-            <Text style={accordionStyles.meta}>{room.floor > 0 ? `Tầng ${room.floor} · ` : ''}{room.area}m² · {room.status === 'available' ? '🟢 Còn trống' : '🔴 Đã thuê'}</Text>
+            <Text style={accordionStyles.meta}>{room.floor > 0 ? `Tầng ${room.floor} · ` : ''}{room.area}m² · {room.status === 'available' ? 'Còn trống' : 'Đã thuê'}</Text>
           </View>
         </View>
         <View style={accordionStyles.headerRight}>
           {room.price > 0 && <Text style={accordionStyles.price}>{formatCurrency(room.price)}</Text>}
-          <Text style={accordionStyles.chevron}>{expanded ? '▲' : '▼'}</Text>
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textMuted} />
         </View>
       </TouchableOpacity>
 
@@ -412,7 +412,7 @@ const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
           <View style={accordionStyles.eqWrap}>
             {room.equipments.map((eq, i) => (
               <View key={i} style={accordionStyles.eqChip}>
-                <Text style={accordionStyles.eqTxt}>✅ {eq}</Text>
+                <IconText icon="check" gap={4} iconSize={12} iconColor={Colors.success} style={accordionStyles.eqTxt}>{eq}</IconText>
               </View>
             ))}
           </View>
@@ -420,7 +420,7 @@ const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
           <Text style={accordionStyles.empty}>Liên hệ chủ nhà để biết chi tiết nội thất phòng.</Text>
         )}
         <TouchableOpacity style={accordionStyles.moreBtn} onPress={onPress}>
-          <Text style={accordionStyles.moreTxt}>📸 Xem ảnh & chi tiết đầy đủ →</Text>
+          <IconText icon="chevron-right" trailing gap={2} style={accordionStyles.moreTxt}>Xem ảnh & chi tiết đầy đủ</IconText>
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -442,7 +442,7 @@ const accordionStyles = StyleSheet.create({
   meta: { fontSize: 12, color: Colors.textSecondary },
   headerRight: { alignItems: 'flex-end', gap: 4 },
   price: { fontSize: 15, fontWeight: '700', color: Colors.error },
-  chevron: { fontSize: 14, color: Colors.textMuted },
+
   body: {
     paddingHorizontal: Spacing.md, paddingBottom: Spacing.md,
     borderTopWidth: 1, borderTopColor: Colors.divider, overflow: 'hidden',
@@ -552,7 +552,7 @@ export const PropertyDetailScreen: React.FC = () => {
       {/* ── Floating back button ──────────────────────────────────────── */}
       <View style={styles.floatBar}>
         <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
-          <Text style={styles.floatBtnTxt}>←</Text>
+          <Icon name="back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
       </View>
 
@@ -578,7 +578,7 @@ export const PropertyDetailScreen: React.FC = () => {
             </ScrollView>
           ) : (
             <View style={styles.photoFallback}>
-              <Text style={{ fontSize: 56 }}>🏠</Text>
+              <Icon name="home" size={52} color={Colors.primaryLight} strokeWidth={1.4} />
             </View>
           )}
 
@@ -595,7 +595,7 @@ export const PropertyDetailScreen: React.FC = () => {
             </View>
           )}
           <View style={[styles.typeBadge, isWholeHouse && styles.typeBadgeGreen]}>
-            <Text style={styles.typeBadgeTxt}>{isWholeHouse ? '🏡 ' : '🏢 '}{typeLabel}</Text>
+            <IconText icon={isWholeHouse ? 'home' : 'building'} gap={5} iconSize={14} style={styles.typeBadgeTxt}>{typeLabel}</IconText>
           </View>
         </View>
 
@@ -604,7 +604,9 @@ export const PropertyDetailScreen: React.FC = () => {
 
           {/* Title + address */}
           <Text style={styles.title}>{property.name}</Text>
-          <Text style={styles.addr}>📍 {property.address}, {property.ward}, {property.city}</Text>
+          <IconText icon="location" multiline gap={5} iconColor={Colors.textMuted} style={styles.addr}>
+            {property.address}, {property.ward}, {property.city}
+          </IconText>
 
           {/* Availability badge — cả hai loại hình */}
           <AvailabilityBadge available={isAvailable} />
@@ -622,26 +624,26 @@ export const PropertyDetailScreen: React.FC = () => {
             <View style={styles.priceDivider} />
             <View style={styles.priceExtras}>
               <View style={styles.priceRow}>
-                <Text style={styles.priceExtraLabel}>⚡ Tiền điện</Text>
+                <IconText icon="electric" gap={6} iconColor={Colors.textMuted} style={styles.priceExtraLabel}>Tiền điện</IconText>
                 <Text style={styles.priceExtraValue}>
                   {property.electricityRate > 0 ? `${formatCurrency(property.electricityRate)}/kWh` : 'Liên hệ'}
                 </Text>
               </View>
               <View style={styles.priceRow}>
-                <Text style={styles.priceExtraLabel}>💧 Tiền nước</Text>
+                <IconText icon="water" gap={6} iconColor={Colors.textMuted} style={styles.priceExtraLabel}>Tiền nước</IconText>
                 <Text style={styles.priceExtraValue}>
                   {property.waterRate > 0 ? `${formatCurrency(property.waterRate)}/khối` : 'Liên hệ'}
                 </Text>
               </View>
               <View style={styles.priceRow}>
-                <Text style={styles.priceExtraLabel}>🔒 Đặt cọc</Text>
+                <IconText icon="deposit" gap={6} iconColor={Colors.textMuted} style={styles.priceExtraLabel}>Đặt cọc</IconText>
                 <Text style={styles.priceExtraValue}>
                   {property.depositMonths > 0 ? `${property.depositMonths} tháng` : 'Thỏa thuận'}
                 </Text>
               </View>
               {property.serviceFee > 0 && (
                 <View style={styles.priceRow}>
-                  <Text style={styles.priceExtraLabel}>🏢 Phí dịch vụ</Text>
+                  <IconText icon="receipt" gap={6} iconColor={Colors.textMuted} style={styles.priceExtraLabel}>Phí dịch vụ</IconText>
                   <Text style={styles.priceExtraValue}>{formatCurrency(property.serviceFee)}/tháng</Text>
                 </View>
               )}
@@ -652,14 +654,14 @@ export const PropertyDetailScreen: React.FC = () => {
           <View style={styles.factsGrid}>
             {/* Cell 1: Diện tích */}
             <View style={styles.factCell}>
-              <Text style={styles.factIcon}>📐</Text>
+              <Icon name="area" size={22} color={Colors.primary} style={styles.factIcon} />
               <Text style={styles.factValue}>{property.area}m²</Text>
               <Text style={styles.factLabel}>{isWholeHouse ? 'Diện tích căn' : 'Diện tích phòng'}</Text>
             </View>
 
             {/* Cell 2: Loại hình */}
             <View style={styles.factCell}>
-              <Text style={styles.factIcon}>{isWholeHouse ? '🏠' : '🛏'}</Text>
+              <Icon name={isWholeHouse ? 'home' : 'bed'} size={22} color={Colors.primary} style={styles.factIcon} />
               <Text style={[styles.factValue, { fontSize: 14 }]}>{typeLabel}</Text>
               <Text style={styles.factLabel}>Loại hình</Text>
             </View>
@@ -668,12 +670,17 @@ export const PropertyDetailScreen: React.FC = () => {
               // Nguyên căn: tổng phòng ngủ + trạng thái cả căn
               <>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🛏</Text>
+                  <Icon name="bed" size={22} color={Colors.primary} style={styles.factIcon} />
                   <Text style={styles.factValue}>{property.totalRooms}</Text>
                   <Text style={styles.factLabel}>Số phòng ngủ</Text>
                 </View>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>{isAvailable ? '✅' : '🔒'}</Text>
+                  <Icon
+                    name={isAvailable ? 'success' : 'lock'}
+                    size={22}
+                    color={isAvailable ? Colors.success : Colors.error}
+                    style={styles.factIcon}
+                  />
                   <Text style={[styles.factValue, { fontSize: 14, color: isAvailable ? Colors.success : Colors.error }]}>
                     {isAvailable ? 'Còn trống' : 'Đã thuê'}
                   </Text>
@@ -684,14 +691,14 @@ export const PropertyDetailScreen: React.FC = () => {
               // Chia phòng: số phòng trống + tổng số phòng
               <>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🚪</Text>
+                  <Icon name="door" size={22} color={Colors.primary} style={styles.factIcon} />
                   <Text style={[styles.factValue, { color: availableRooms.length > 0 ? Colors.success : Colors.error }]}>
                     {availableRooms.length}
                   </Text>
                   <Text style={styles.factLabel}>Phòng còn trống</Text>
                 </View>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🏢</Text>
+                  <Icon name="building" size={22} color={Colors.primary} style={styles.factIcon} />
                   <Text style={styles.factValue}>{property.totalRooms}</Text>
                   <Text style={styles.factLabel}>Tổng số phòng</Text>
                 </View>
@@ -702,7 +709,7 @@ export const PropertyDetailScreen: React.FC = () => {
           {/* ── Amenity chips ──────────────────────────────────────────── */}
           {property.amenities.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>✨ Tiện ích</Text>
+              <Text style={styles.sectionTitle}>Tiện ích</Text>
               <View style={styles.amenWrap}>
                 {property.amenities.map((am, i) => (
                   <View key={i} style={styles.amenChip}>
@@ -715,15 +722,20 @@ export const PropertyDetailScreen: React.FC = () => {
 
           {/* ── Collapsible description ────────────────────────────────── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📝 Mô tả</Text>
+            <Text style={styles.sectionTitle}>Mô tả</Text>
             <Text style={styles.descTxt} numberOfLines={descExpanded ? undefined : 4}>
               {property.description}
             </Text>
             {longDesc && (
               <TouchableOpacity onPress={() => setDescExpanded((v) => !v)} style={styles.descToggle}>
-                <Text style={styles.descToggleTxt}>
-                  {descExpanded ? 'Thu gọn ▲' : 'Xem thêm ▼'}
-                </Text>
+                <IconText
+                  icon={descExpanded ? 'chevron-up' : 'chevron-down'}
+                  trailing
+                  gap={2}
+                  style={styles.descToggleTxt}
+                >
+                  {descExpanded ? 'Thu gọn' : 'Xem thêm'}
+                </IconText>
               </TouchableOpacity>
             )}
           </View>
@@ -731,18 +743,18 @@ export const PropertyDetailScreen: React.FC = () => {
           {/* ── Nguyên căn: bạn nhận được trọn căn ────────────────────── */}
           {isWholeHouse ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🏡 Thuê trọn nguyên căn</Text>
+              <Text style={styles.sectionTitle}>Thuê trọn nguyên căn</Text>
               <View style={styles.includeCard}>
                 <View style={styles.includeRow}>
-                  <Text style={styles.includeIcon}>🛏</Text>
+                  <Icon name="bed" size={20} color={Colors.primary} style={styles.includeIcon} />
                   <Text style={styles.includeTxt}>Toàn bộ {property.totalRooms} phòng ngủ, sử dụng riêng cho gia đình bạn</Text>
                 </View>
                 <View style={styles.includeRow}>
-                  <Text style={styles.includeIcon}>📐</Text>
+                  <Icon name="area" size={20} color={Colors.primary} style={styles.includeIcon} />
                   <Text style={styles.includeTxt}>{property.area}m² diện tích sử dụng cho cả căn</Text>
                 </View>
                 <View style={styles.includeRow}>
-                  <Text style={styles.includeIcon}>🔑</Text>
+                  <Icon name="key" size={20} color={Colors.primary} style={styles.includeIcon} />
                   <Text style={styles.includeTxt}>Toàn quyền sử dụng, tự do bố trí không gian</Text>
                 </View>
               </View>
@@ -750,11 +762,11 @@ export const PropertyDetailScreen: React.FC = () => {
           ) : (
             /* ── Chia phòng: danh sách phòng còn trống (clickable) ────── */
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🚪 Phòng còn trống ({availableRooms.length})</Text>
+              <Text style={styles.sectionTitle}>Phòng còn trống ({availableRooms.length})</Text>
               {availableRooms.length > 0 ? (
                 <>
                   <View style={styles.hintBox}>
-                    <Text style={styles.hintTxt}>💡 Nhấn vào phòng để xem ảnh & nội thất chi tiết</Text>
+                    <IconText icon="info" style={styles.hintTxt}>Nhấn vào phòng để xem ảnh & nội thất chi tiết</IconText>
                   </View>
                   {availableRooms.map((room) => (
                     <ExpandableRoom
@@ -777,7 +789,7 @@ export const PropertyDetailScreen: React.FC = () => {
           {/* ── Similar Properties ────────────────────────────────────── */}
           {similar.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🔍 Bất động sản tương tự</Text>
+              <Text style={styles.sectionTitle}>Bất động sản tương tự</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 0 }}>
                 {similar.map((sp) => (
                   <PropertyCard
@@ -839,7 +851,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     ...Shadow.md,
   },
-  floatBtnTxt: { fontSize: 20, color: Colors.textPrimary },
+
 
   scroll: { flex: 1 },
   scrollContent: {},
@@ -896,7 +908,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: 14,
     padding: Spacing.md, alignItems: 'center', ...Shadow.sm,
   },
-  factIcon: { fontSize: 24, marginBottom: 4 },
+  factIcon: { marginBottom: 6 },
   factValue: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
   factLabel: { fontSize: 11, color: Colors.textSecondary },
 
@@ -923,7 +935,7 @@ const styles = StyleSheet.create({
     gap: Spacing.md, ...Shadow.sm,
   },
   includeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  includeIcon: { fontSize: 20, width: 26, textAlign: 'center' },
+  includeIcon: { marginHorizontal: 3 },
   includeTxt: { flex: 1, fontSize: 14, lineHeight: 20, color: Colors.textPrimary },
 
   // Chia phòng — trạng thái rỗng

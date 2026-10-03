@@ -1,18 +1,16 @@
-import React, { useState, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView, RefreshControl,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors } from '@/constants';
 import { AppNotification } from '@/types';
-import { formatRelativeTime } from '@/utils';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { navigateFromNotification } from '@/navigation/navigationRef';
-import { serverNow } from '@/utils/serverTime';
+import type { IconName } from '@/components/common/Icon';
+import {
+  NotificationFeed, applyFeedFilter, buildFeedFilters, type FeedItem,
+} from '@/components/common/NotificationFeed';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
 const mapApiNotif = (n: ApiNotification): AppNotification => ({
@@ -27,8 +25,7 @@ const mapApiNotif = (n: ApiNotification): AppNotification => ({
   actionParams: n.params,
 });
 
-
-// ─── Category / filter mappings (business logic unchanged) ────────────────────
+// ─── Mục của từng loại thông báo — cũng là khoá của chip lọc ──────────────────
 const TYPE_CATEGORY: Record<string, string> = {
   new_bill: 'Hóa đơn',
   bill_overdue: 'Hóa đơn',
@@ -37,14 +34,14 @@ const TYPE_CATEGORY: Record<string, string> = {
   payment_pending_verify: 'Thanh toán',
   contract_expiring: 'Hợp đồng',
   contract_expired: 'Hợp đồng',
-  // Đơn gia hạn (BE 02/09/2026) — chung tab "Hợp đồng".
+  // Đơn gia hạn (BE 02/09/2026) — chung mục "Hợp đồng".
   extension_requested: 'Hợp đồng',
   extension_approved: 'Hợp đồng',
   extension_closed: 'Hợp đồng',
   maintenance_new: 'Sửa chữa',
   maintenance_accepted: 'Sửa chữa',
   maintenance_resolved: 'Sửa chữa',
-  // Tách từ BE 13/08/2026 — vẫn chung tab "Sửa chữa", chỉ khác icon/màu.
+  // Tách từ BE 13/08/2026 — vẫn chung mục "Sửa chữa", chỉ khác icon/màu.
   maintenance_confirm: 'Sửa chữa',
   maintenance_cost: 'Sửa chữa',
   maintenance_cancelled: 'Sửa chữa',
@@ -57,74 +54,51 @@ const TYPE_CATEGORY: Record<string, string> = {
   system: 'Hệ thống',
 };
 
-const FILTER_TYPES: { key: string; label: string }[] = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'Hóa đơn', label: 'Hóa đơn' },
-  { key: 'Thanh toán', label: 'Thanh toán' },
-  { key: 'Sửa chữa', label: 'Sửa chữa' },
-  { key: 'Trả phòng', label: 'Trả phòng' },
-  { key: 'Hợp đồng', label: 'Hợp đồng' },
-  { key: 'Hệ thống', label: 'Hệ thống' },
+/**
+ * Type BE gửi mà FE chưa biết → xếp vào "Hệ thống" thay vì rơi khỏi mọi mục.
+ *
+ * Trước đây `TYPE_CATEGORY[n.type]` trả undefined nên thông báo chỉ hiện ở "Tất cả";
+ * dòng lại ghi nhãn "Khác" mà không có chip "Khác" nào để bấm. Mỗi lần BE thêm type mới
+ * là một lần thông báo mất hút khi lọc.
+ */
+const categoryOf = (type: string): string => TYPE_CATEGORY[type] ?? 'Hệ thống';
+
+/** Thứ tự chip lọc: tiền trước, rồi sửa chữa, rồi các tin về phòng/hợp đồng. */
+const CATEGORY_ORDER = [
+  'Hóa đơn', 'Thanh toán', 'Sửa chữa', 'Thiết bị', 'Đồng hồ',
+  'Nhận phòng', 'Trả phòng', 'Hợp đồng', 'Hệ thống',
 ];
 
-// ─── Visual config per notification type ──────────────────────────────────────
-const TYPE_ACCENT: Record<string, { emoji: string; color: string; bg: string }> = {
-  new_bill:               { emoji: '📋', color: Colors.warning,   bg: Colors.warningLight },
-  bill_overdue:           { emoji: '⚠️', color: Colors.error,     bg: Colors.errorLight },
-  payment_success:        { emoji: '✅', color: Colors.success,   bg: Colors.successLight },
-  payment_failed:         { emoji: '❌', color: Colors.error,     bg: Colors.errorLight },
-  payment_pending_verify: { emoji: '⏳', color: Colors.warning,   bg: Colors.warningLight },
-  contract_expiring:      { emoji: '📄', color: '#D97706',        bg: Colors.warningLight },
-  contract_expired:       { emoji: '📄', color: Colors.error,     bg: Colors.errorLight },
-  extension_requested:    { emoji: '📝', color: Colors.warning,   bg: Colors.warningLight },
-  extension_approved:     { emoji: '📗', color: Colors.success,   bg: Colors.successLight },
-  extension_closed:       { emoji: '📄', color: Colors.textMuted, bg: Colors.background },
-  maintenance_new:        { emoji: '🔧', color: Colors.info,      bg: Colors.infoLight },
-  maintenance_accepted:   { emoji: '👷', color: Colors.info,      bg: Colors.infoLight },
-  maintenance_resolved:   { emoji: '✅', color: Colors.success,   bg: Colors.successLight },
+// ─── Biểu tượng + màu theo loại ───────────────────────────────────────────────
+const TYPE_ACCENT: Record<string, { icon: IconName; color: string; bg: string }> = {
+  new_bill:               { icon: 'receipt',         color: '#B45309',        bg: Colors.warningLight },
+  bill_overdue:           { icon: 'warning',         color: Colors.error,     bg: Colors.errorLight },
+  payment_success:        { icon: 'success',         color: '#047857',        bg: Colors.successLight },
+  payment_failed:         { icon: 'error',           color: Colors.error,     bg: Colors.errorLight },
+  payment_pending_verify: { icon: 'hourglass',       color: '#B45309',        bg: Colors.warningLight },
+  contract_expiring:      { icon: 'calendar-clock',  color: '#B45309',        bg: Colors.warningLight },
+  contract_expired:       { icon: 'calendar-x',      color: Colors.error,     bg: Colors.errorLight },
+  extension_requested:    { icon: 'contract',        color: '#B45309',        bg: Colors.warningLight },
+  extension_approved:     { icon: 'calendar-check',  color: '#047857',        bg: Colors.successLight },
+  extension_closed:       { icon: 'document',        color: Colors.textSecondary, bg: Colors.divider },
+  maintenance_new:        { icon: 'wrench',          color: Colors.info,      bg: Colors.infoLight },
+  maintenance_accepted:   { icon: 'hard-hat',        color: Colors.info,      bg: Colors.infoLight },
+  maintenance_resolved:   { icon: 'success',         color: '#047857',        bg: Colors.successLight },
   // "Đã sửa xong — vui lòng xác nhận": khách PHẢI bấm, quá N ngày hệ thống tự đóng.
   // Cố tình dùng màu cảnh báo chứ không phải xanh lá — xanh lá đọc thành "xong rồi,
   // không cần làm gì", đúng cái hiểu nhầm khiến ticket bị tự đóng.
-  maintenance_confirm:    { emoji: '📝', color: Colors.warning,   bg: Colors.warningLight },
-  maintenance_cost:       { emoji: '💵', color: Colors.accent,    bg: Colors.primaryBg },
-  maintenance_cancelled:  { emoji: '🚫', color: Colors.textMuted, bg: '#F1F5F9' },
-  maintenance_rejected:   { emoji: '↩️', color: Colors.error,     bg: Colors.errorLight },
+  maintenance_confirm:    { icon: 'clipboard-check', color: '#B45309',        bg: Colors.warningLight },
+  maintenance_cost:       { icon: 'cash',            color: Colors.accentDark, bg: '#CFFAFE' },
+  maintenance_cancelled:  { icon: 'ban',             color: Colors.textSecondary, bg: Colors.divider },
+  maintenance_rejected:   { icon: 'undo',            color: Colors.error,     bg: Colors.errorLight },
   // Quá hạn tự sửa — khách đã trễ deadline. Đỏ như `rejected` nhưng khác biểu tượng:
-  // "↩️ bị từ chối" và "⏰ quá hạn" là hai việc phải làm khác nhau.
-  maintenance_overdue:    { emoji: '⏰', color: Colors.error,     bg: Colors.errorLight },
-  equipment_damaged:      { emoji: '⚙️', color: Colors.error,     bg: Colors.errorLight },
-  meter_reading_due:      { emoji: '📊', color: Colors.warning,   bg: Colors.warningLight },
-  tenant_onboarded:       { emoji: '🏠', color: Colors.success,   bg: Colors.successLight },
-  checkout_request:       { emoji: '🚪', color: '#DC2626',        bg: Colors.errorLight },
-  system:                 { emoji: '🔔', color: Colors.textMuted, bg: '#F1F5F9' },
-};
-
-// ─── Time grouping helper ─────────────────────────────────────────────────────
-type Section = { title: string; data: AppNotification[] };
-
-const groupByTime = (items: AppNotification[]): Section[] => {
-  const now = serverNow();
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const todayMs    = startOfDay(now);
-  const yesterMs   = todayMs - 86400000;
-  const weekMs     = todayMs - 7 * 86400000;
-
-  const groups: Section[] = [
-    { title: 'Hôm nay',  data: [] },
-    { title: 'Hôm qua',  data: [] },
-    { title: 'Tuần này', data: [] },
-    { title: 'Cũ hơn',   data: [] },
-  ];
-
-  for (const n of items) {
-    const t = startOfDay(new Date(n.createdAt));
-    if (t >= todayMs)    groups[0].data.push(n);
-    else if (t >= yesterMs) groups[1].data.push(n);
-    else if (t >= weekMs)   groups[2].data.push(n);
-    else                    groups[3].data.push(n);
-  }
-
-  return groups.filter(g => g.data.length > 0);
+  // "bị từ chối" (mũi tên quay lại) và "quá hạn" (đồng hồ báo thức) là hai việc khác nhau.
+  maintenance_overdue:    { icon: 'alarm',           color: Colors.error,     bg: Colors.errorLight },
+  equipment_damaged:      { icon: 'settings',        color: Colors.error,     bg: Colors.errorLight },
+  meter_reading_due:      { icon: 'meter',           color: '#B45309',        bg: Colors.warningLight },
+  tenant_onboarded:       { icon: 'home',            color: '#047857',        bg: Colors.successLight },
+  checkout_request:       { icon: 'door',            color: '#DC2626',        bg: Colors.errorLight },
+  system:                 { icon: 'bell',            color: Colors.textSecondary, bg: Colors.divider },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -150,21 +124,18 @@ export const TenantNotificationScreen: React.FC = () => {
     setRefreshing(false);
   }, [load]);
 
-  // ── Business logic ────────────────────────────────────────────────────────
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
-  /**
-   * Type BE gửi mà FE chưa biết → xếp vào "Hệ thống" thay vì rơi khỏi mọi tab.
-   *
-   * Trước đây `TYPE_CATEGORY[n.type]` trả undefined nên thông báo chỉ hiện ở tab "Tất
-   * cả"; dòng lại ghi nhãn "Khác" mà không có tab "Khác" nào để bấm. Người dùng lọc
-   * theo tab là mất hút thông báo — mỗi lần BE thêm type mới là một lần như vậy.
-   */
-  const categoryOf = (type: string): string => TYPE_CATEGORY[type] ?? 'Hệ thống';
-
-  const filtered = filter === 'all'
-    ? notifications
-    : notifications.filter(n => categoryOf(n.type) === filter);
+  const items: FeedItem[] = useMemo(() => notifications.map((n) => {
+    const accent = TYPE_ACCENT[n.type] ?? TYPE_ACCENT.system;
+    return {
+      id: n.id, title: n.title, body: n.body, createdAt: n.createdAt, isRead: n.isRead,
+      icon: accent.icon, color: accent.color, bg: accent.bg,
+      category: categoryOf(n.type), actionLabel: n.actionLabel,
+    };
+  }), [notifications]);
+  const filters = useMemo(() => buildFeedFilters(items, CATEGORY_ORDER), [items]);
+  const visible = useMemo(() => applyFeedFilter(items, filter), [items, filter]);
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
@@ -243,388 +214,22 @@ export const TenantNotificationScreen: React.FC = () => {
       }
     }
   };
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const sections = groupByTime(filtered);
-
-  // ── Card renderer ─────────────────────────────────────────────────────────
-  const renderItem = ({ item }: { item: AppNotification }) => {
-    const accent  = TYPE_ACCENT[item.type] ?? TYPE_ACCENT.system;
-    // Cùng một hàm với bộ lọc — nhãn trên thẻ phải khớp tab bấm được, không thì
-    // người dùng thấy "Khác" rồi đi tìm tab "Khác" không tồn tại.
-    const category = categoryOf(item.type);
-
-    return (
-      <TouchableOpacity
-        style={[styles.card, !item.isRead && styles.cardUnread]}
-        onPress={() => handleNotifPress(item)}
-        activeOpacity={0.72}
-      >
-        {/* Unread left rail */}
-        {!item.isRead && <View style={[styles.unreadRail, { backgroundColor: accent.color }]} />}
-
-        <View style={styles.cardInner}>
-          {/* Icon */}
-          <View style={[styles.iconWrap, { backgroundColor: accent.bg }]}>
-            <Text style={styles.iconEmoji}>{accent.emoji}</Text>
-          </View>
-
-          {/* Content */}
-          <View style={styles.content}>
-            {/* Meta row: category chip + timestamp + unread dot */}
-            <View style={styles.metaRow}>
-              <View style={[styles.categoryPill, { backgroundColor: accent.bg }]}>
-                <Text style={[styles.categoryPillText, { color: accent.color }]}>{category}</Text>
-              </View>
-              <Text style={styles.timeText}>{formatRelativeTime(item.createdAt)}</Text>
-              {!item.isRead && (
-                <View style={[styles.unreadDot, { backgroundColor: accent.color }]} />
-              )}
-            </View>
-
-            {/* Title */}
-            <Text
-              style={[styles.title, !item.isRead && styles.titleUnread]}
-              numberOfLines={2}
-            >
-              {item.title}
-            </Text>
-
-            {/* Body preview */}
-            <Text style={styles.body} numberOfLines={2}>{item.body}</Text>
-
-            {/* CTA */}
-            {item.actionLabel && (
-              <Text style={[styles.cta, { color: accent.color }]}>{item.actionLabel} →</Text>
-            )}
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  // ── Section header ────────────────────────────────────────────────────────
-  const renderSectionHeader = ({ section }: { section: Section }) => (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionLabel}>{section.title}</Text>
-      <View style={styles.sectionLine} />
-    </View>
-  );
-
-  // ── Empty state ───────────────────────────────────────────────────────────
-  const ListEmpty = () => (
-    <View style={styles.empty}>
-      <View style={styles.emptyIconWrap}>
-        <Text style={styles.emptyIcon}>🔕</Text>
-      </View>
-      <Text style={styles.emptyTitle}>Bạn chưa có thông báo nào</Text>
-      <Text style={styles.emptyDesc}>
-        {filter === 'all'
-          ? 'Mọi thông báo về hóa đơn, bảo trì và hợp đồng sẽ xuất hiện ở đây.'
-          : `Không có thông báo nào trong mục "${filter}".`}
-      </Text>
-    </View>
-  );
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      {/* ── Header ────────────────────────────────────────────────────────── */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={styles.backBtnText}>←</Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Thông báo</Text>
-          {unreadCount > 0 && (
-            <View style={styles.headerBadge}>
-              <Text style={styles.headerBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-            </View>
-          )}
-        </View>
-
-        {unreadCount > 0 ? (
-          <TouchableOpacity onPress={markAllRead} style={styles.markAllBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.markAllText}>Đọc tất cả</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.markAllBtn} />
-        )}
-      </View>
-
-      {/* ── Filter chips ──────────────────────────────────────────────────── */}
-      <View style={styles.filterWrapper}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-          bounces={false}
-        >
-          {FILTER_TYPES.map(f => {
-            const active = filter === f.key;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => setFilter(f.key)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* ── Unread summary pill ───────────────────────────────────────────── */}
-      {unreadCount > 0 && filter === 'all' && (
-        <View style={styles.unreadPill}>
-          <View style={styles.unreadPillDot} />
-          <Text style={styles.unreadPillText}>{unreadCount} thông báo chưa đọc</Text>
-        </View>
-      )}
-
-      {/* ── Notification list ─────────────────────────────────────────────── */}
-      <SectionList
-        sections={sections}
-        keyExtractor={n => n.id}
-        renderItem={renderItem}
-        renderSectionHeader={renderSectionHeader}
-        contentContainerStyle={[styles.list, sections.length === 0 && { flex: 1 }]}
-        showsVerticalScrollIndicator={false}
-        stickySectionHeadersEnabled={false}
-        SectionSeparatorComponent={() => <View style={{ height: 4 }} />}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListEmptyComponent={<ListEmpty />}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-      />
-    </SafeAreaView>
+    <NotificationFeed
+      items={visible}
+      filters={filters}
+      activeFilter={filter}
+      onFilter={setFilter}
+      unreadCount={unreadCount}
+      onMarkAllRead={markAllRead}
+      onPressItem={(id) => {
+        const n = notifications.find(x => x.id === id);
+        if (n) void handleNotifPress(n);
+      }}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      onBack={() => navigation.goBack()}
+    />
   );
 };
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Colors.background },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.base,
-    paddingVertical: 14,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  backBtn: { width: 44, height: 36, justifyContent: 'center' },
-  backBtnText: { fontSize: 20, color: Colors.textPrimary, lineHeight: 24 },
-  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary },
-  headerBadge: {
-    minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: Colors.error,
-    alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  headerBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
-  markAllBtn: { width: 80, alignItems: 'flex-end', justifyContent: 'center' },
-  markAllText: { fontSize: 13, fontWeight: '600', color: Colors.primary },
-
-  // Filter chips
-  filterWrapper: {
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  filterScroll: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 10,
-    gap: Spacing.sm,
-  },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: BorderRadius.full,
-    backgroundColor: '#F1F5F9',
-  },
-  chipActive: {
-    backgroundColor: Colors.primaryBg,
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  chipTextActive: {
-    color: Colors.primary,
-  },
-
-  // Unread summary
-  unreadPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    marginBottom: 2,
-  },
-  unreadPillDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: Colors.primary,
-  },
-  unreadPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-
-  // Section headers
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingTop: Spacing.base,
-    paddingBottom: 6,
-    paddingHorizontal: Spacing.lg,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  sectionLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.divider,
-  },
-
-  // List
-  list: { paddingHorizontal: Spacing.lg, paddingBottom: 48 },
-
-  // Card
-  card: {
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    ...Shadow.sm,
-  },
-  cardUnread: {
-    backgroundColor: '#F5F5FF',
-  },
-  unreadRail: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    borderTopLeftRadius: BorderRadius.lg,
-    borderBottomLeftRadius: BorderRadius.lg,
-  },
-  cardInner: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    padding: Spacing.md,
-    paddingLeft: 16,
-  },
-
-  // Icon
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    marginTop: 2,
-  },
-  iconEmoji: { fontSize: 18 },
-
-  // Content
-  content: { flex: 1, gap: 3 },
-
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  categoryPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-  },
-  categoryPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  timeText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    flex: 1,
-  },
-  unreadDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-
-  title: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.textPrimary,
-    lineHeight: 20,
-  },
-  titleUnread: {
-    fontWeight: '700',
-  },
-
-  body: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-
-  cta: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-
-  // Empty state
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.lg,
-  },
-  emptyIcon: { fontSize: 32 },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
-    textAlign: 'center',
-  },
-  emptyDesc: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-});

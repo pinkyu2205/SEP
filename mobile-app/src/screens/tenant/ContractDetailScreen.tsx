@@ -14,6 +14,7 @@ import {
   ContractDetailBody, ImageViewerModal, mapDetail, contractBodyStyles as styles,
 } from '@/components/contract/ContractDetailBody';
 import { ExtensionRequestCard } from '@/components/contract/ExtensionRequestCard';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * Xem chi tiết một hợp đồng của khách thuê.
@@ -67,7 +68,7 @@ export const ContractDetailScreen: React.FC = () => {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+            <Icon name="back" size={26} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Chi tiết hợp đồng</Text>
           <View style={{ width: 80 }} />
@@ -100,7 +101,7 @@ export const ContractDetailScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết hợp đồng</Text>
         <View style={{ width: 80 }} />
@@ -127,7 +128,7 @@ export const ContractDetailScreen: React.FC = () => {
               style={styles.actionBtnSecondary}
               onPress={() => Linking.openURL(contract.pdfUrl!)}
             >
-              <Text style={styles.actionBtnSecondaryText}>📥 Tải PDF hợp đồng</Text>
+              <IconText icon="download" style={styles.actionBtnSecondaryText}>Tải PDF hợp đồng</IconText>
             </TouchableOpacity>
           )}
 
@@ -137,9 +138,9 @@ export const ContractDetailScreen: React.FC = () => {
               style={[styles.actionBtnOutline, { borderColor: '#DC2626' }]}
               onPress={() => navigation.navigate('RequestCheckout', { contract })}
             >
-              <Text style={[styles.actionBtnOutlineText, { color: '#DC2626' }]}>
-                🚪 Yêu cầu trả phòng
-              </Text>
+              <IconText icon="door" style={[styles.actionBtnOutlineText, { color: '#DC2626' }]}>
+                Yêu cầu trả phòng
+              </IconText>
             </TouchableOpacity>
           )}
         </View>

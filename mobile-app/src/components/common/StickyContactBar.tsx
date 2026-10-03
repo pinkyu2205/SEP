@@ -5,6 +5,7 @@ import {
 import { showAlert } from '@/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Shadow } from '@/constants';
+import { Icon } from './Icon';
 
 const HOTLINE = '19008386';
 const HOTLINE_DISPLAY = '1900 8386';
@@ -26,7 +27,7 @@ export const StickyContactBar: React.FC<StickyContactBarProps> = ({ propertyName
   return (
     <View style={[styles.wrapper, { paddingBottom: bottomPad }]}>
       <TouchableOpacity style={[styles.btn, styles.btnCall]} onPress={openCall} activeOpacity={0.85}>
-        <Text style={styles.btnIcon}>📞</Text>
+        <Icon name="phone" size={18} color={Colors.white} />
         <Text style={styles.btnLabel}>Gọi hotline {HOTLINE_DISPLAY}</Text>
       </TouchableOpacity>
     </View>
@@ -53,6 +54,6 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   btnCall: { backgroundColor: '#059669' },
-  btnIcon:  { fontSize: 18 },
+
   btnLabel: { fontSize: 11, fontWeight: '700', color: Colors.white },
 });

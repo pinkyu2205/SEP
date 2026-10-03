@@ -15,6 +15,7 @@
  *
  * Map BE enum ↔ FE key: xem BE_STATUS_MAP trong services/shared/maintenanceMappers.
  */
+import type { IconName } from '@/components/common/Icon';
 
 export type MaintenanceStatusKey =
   | 'open'                   // chờ manager tới xem (đã có lịch hẹn)
@@ -43,22 +44,22 @@ export interface StatusMeta {
   color: string;
   /** nền nhạt cho badge */
   bg: string;
-  /** emoji/icon */
-  icon: string;
+  /** tên icon trong bộ `Icon` */
+  icon: IconName;
   /** vị trí trong STATUS_FLOW (Luồng A); rẽ nhánh Luồng B hoặc trạng thái phụ = -1 */
   step: number;
 }
 
 export const MAINTENANCE_STATUS_META: Record<MaintenanceStatusKey, StatusMeta> = {
-  open:                   { label: 'Chờ kiểm tra',      color: '#F59E0B', bg: '#FFFBEB', icon: '⏳', step: 0 },
-  repair_scheduled:        { label: 'Đã đặt lịch sửa',   color: '#2563EB', bg: '#EFF6FF', icon: '📅', step: -1 },
-  in_repair:               { label: 'Đang sửa chữa',     color: '#8B5CF6', bg: '#F5F3FF', icon: '🔧', step: 1 },
-  tenant_fault:            { label: 'Lỗi do khách',      color: '#DC2626', bg: '#FEF2F2', icon: '⚠️', step: -1 },
-  pending_tenant_repair:  { label: 'Khách tự sửa',      color: '#F97316', bg: '#FFF7ED', icon: '🛠', step: -1 },
-  outstanding_damage:     { label: 'Chờ trừ cọc',       color: '#B91C1C', bg: '#FEF2F2', icon: '💸', step: -1 },
-  waiting_payment:         { label: 'Chờ thanh toán',    color: '#B45309', bg: '#FFFBEB', icon: '💳', step: -1 },
-  closed:                 { label: 'Hoàn tất',          color: '#10B981', bg: '#F0FDF4', icon: '✅', step: 2 },
-  cancelled:              { label: 'Đã hủy',            color: '#6B7280', bg: '#F3F4F6', icon: '✕',  step: -1 },
+  open:                   { label: 'Chờ kiểm tra',      color: '#F59E0B', bg: '#FFFBEB', icon: 'hourglass', step: 0 },
+  repair_scheduled:        { label: 'Đã đặt lịch sửa',   color: '#2563EB', bg: '#EFF6FF', icon: 'calendar',  step: -1 },
+  in_repair:               { label: 'Đang sửa chữa',     color: '#8B5CF6', bg: '#F5F3FF', icon: 'wrench',    step: 1 },
+  tenant_fault:            { label: 'Lỗi do khách',      color: '#DC2626', bg: '#FEF2F2', icon: 'warning',   step: -1 },
+  pending_tenant_repair:  { label: 'Khách tự sửa',      color: '#F97316', bg: '#FFF7ED', icon: 'hammer',    step: -1 },
+  outstanding_damage:     { label: 'Chờ trừ cọc',       color: '#B91C1C', bg: '#FEF2F2', icon: 'wallet',    step: -1 },
+  waiting_payment:         { label: 'Chờ thanh toán',    color: '#B45309', bg: '#FFFBEB', icon: 'card',      step: -1 },
+  closed:                 { label: 'Hoàn tất',          color: '#10B981', bg: '#F0FDF4', icon: 'success',   step: 2 },
+  cancelled:              { label: 'Đã hủy',            color: '#6B7280', bg: '#F3F4F6', icon: 'ban',       step: -1 },
 };
 
 export interface PriorityMeta {
@@ -75,8 +76,8 @@ export const MAINTENANCE_PRIORITY_META: Record<MaintenancePriorityKey, PriorityM
 };
 
 /** Chỉ còn 4 loại (STRUCTURAL/OTHER đã bỏ — xem doc §3.4). */
-export const MAINTENANCE_CATEGORY_EMOJI: Record<string, string> = {
-  appliance: '📺', furniture: '🪑', plumbing: '🚰', electrical: '⚡',
+export const MAINTENANCE_CATEGORY_ICON: Record<string, IconName> = {
+  appliance: 'ac', furniture: 'sofa', plumbing: 'bath', electrical: 'electric',
 };
 
 export const MAINTENANCE_CATEGORY_LABEL: Record<string, string> = {

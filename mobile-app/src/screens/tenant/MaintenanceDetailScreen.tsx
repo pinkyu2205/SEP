@@ -12,7 +12,7 @@ import {
   pickEvidenceFromCamera, pickEvidenceFromLibrary, type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
+  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON, MAINTENANCE_BILLING_HINT_META,
   MAINTENANCE_VISIT_SLOT_MINUTES,
 } from '@/constants/maintenance';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
@@ -28,13 +28,14 @@ import type { SharedBill } from '@/types/bill';
 import { serverNow } from '@/utils/serverTime';
 import { isBeforeAppointmentDay, toLocalDateTime, toApiDateTime } from '@/utils/maintenanceAppointment';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
-const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
+const CATEGORY_ICON = MAINTENANCE_CATEGORY_ICON;
 
-const STATUS_META: Record<string, { label: string; color: string; emoji: string }> =
+const STATUS_META: Record<string, { label: string; color: string; icon: IconName }> =
   Object.fromEntries(
     Object.entries(MAINTENANCE_STATUS_META).map(([k, m]) => [
-      k, { label: m.label, color: m.color, emoji: m.icon },
+      k, { label: m.label, color: m.color, icon: m.icon },
     ]),
   );
 
@@ -160,7 +161,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       await realMaintenanceService.submitSelfRepair(idNum, selfRepairNote.trim() || undefined, selfRepairAssets);
       await refreshReal();
       setSelfRepairNote(''); setSelfRepairAssets([]);
-      showAlert('✅ Đã gửi', 'Quản lý sẽ kiểm tra và xác nhận kết quả sửa chữa của bạn.');
+      showAlert('Đã gửi', 'Quản lý sẽ kiểm tra và xác nhận kết quả sửa chữa của bạn.');
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi ảnh. Vui lòng thử lại.')); }
     finally { setBusy(false); }
   };
@@ -195,7 +196,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       await realMaintenanceService.rescheduleVisit(idNum, { visitAppointmentAt: toApiDateTime(dt) });
       await refreshReal();
       setRescheduleOpen(false);
-      showAlert('✅ Đã đổi lịch hẹn', 'Lịch hẹn xem đã được cập nhật.');
+      showAlert('Đã đổi lịch hẹn', 'Lịch hẹn xem đã được cập nhật.', undefined, 'success');
     } catch (e: any) {
       showAlert('Không thể đổi lịch', apiErrMsg(e, 'Vui lòng thử lại.'));
     } finally {
@@ -226,7 +227,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+            <Icon name="back" size={26} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Chi tiết yêu cầu</Text>
           <View style={{ width: 40 }} />
@@ -256,7 +257,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết yêu cầu</Text>
         <View style={{ width: 80 }} />
@@ -265,7 +266,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Trạng thái chính */}
         <View style={[styles.statusBanner, { backgroundColor: currentStatusMeta.color + '15' }]}>
-          <Text style={styles.statusEmoji}>{currentStatusMeta.emoji}</Text>
+          <Icon name={currentStatusMeta.icon} size={28} color={currentStatusMeta.color} />
           <View style={{ flex: 1 }}>
             <Text style={[styles.statusLabel, { color: currentStatusMeta.color }]}>
               {currentStatusMeta.label}
@@ -284,11 +285,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {/* Thông tin yêu cầu */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📋 Thông tin yêu cầu</Text>
+            <IconText icon="clipboard" style={styles.sectionTitle}>Thông tin yêu cầu</IconText>
           </View>
           <View style={styles.infoCard}>
             <View style={styles.titleRow}>
-              <Text style={styles.categoryEmoji}>{(request.category && CATEGORY_EMOJI[request.category]) ?? '🔧'}</Text>
+              <Icon
+                name={(request.category && CATEGORY_ICON[request.category]) || 'wrench'}
+                size={28}
+                color={Colors.primary}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.requestTitle}>{request.title}</Text>
                 <Text style={styles.requestCategory}>{getMaintenanceCategoryLabel(request.category)}</Text>
@@ -320,7 +325,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
               {request.assignedTo && (
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>Quản lý phụ trách</Text>
-                  <Text style={styles.metaValue}>👤 {request.assignedTo}</Text>
+                  <Text style={styles.metaValue}>{request.assignedTo}</Text>
                 </View>
               )}
               {request.resolvedAt && (
@@ -338,22 +343,27 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {/* Lịch hẹn xem — chỉ còn ý nghĩa lúc OPEN (05/09/2026) */}
         {request.status === 'open' && request.visitAppointmentAt && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📅 Lịch hẹn quản lý tới xem</Text>
+            <IconText icon="calendar" style={styles.sectionTitle}>Lịch hẹn quản lý tới xem</IconText>
             <View style={styles.infoCard}>
               <Text style={styles.appointmentTime}>{formatDateTime(request.visitAppointmentAt)}</Text>
-              <Text style={styles.appointmentStatus}>
+              <IconText
+                icon={request.visitArrivalConfirmedAt ? 'check' : 'hourglass'}
+                iconColor={request.visitArrivalConfirmedAt ? Colors.success : Colors.textMuted}
+                multiline
+                style={styles.appointmentStatus}
+              >
                 {request.visitArrivalConfirmedAt
-                  ? `✓ Quản lý đã xác nhận có mặt lúc ${formatDateTime(request.visitArrivalConfirmedAt)}`
-                  : '⏳ Quản lý chưa xác nhận có mặt'}
-              </Text>
+                  ? `Quản lý đã xác nhận có mặt lúc ${formatDateTime(request.visitArrivalConfirmedAt)}`
+                  : 'Quản lý chưa xác nhận có mặt'}
+              </IconText>
               <View style={styles.appointmentActions}>
                 {!request.visitArrivalConfirmedAt && isBeforeAppointmentDay(request.visitAppointmentAt) && (
                   <TouchableOpacity style={styles.appointmentBtnOutline} onPress={openReschedule}>
-                    <Text style={styles.appointmentBtnOutlineText}>🗓 Đổi lịch hẹn</Text>
+                    <IconText icon="calendar" style={styles.appointmentBtnOutlineText}>Đổi lịch hẹn</IconText>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity style={styles.appointmentBtnDanger} onPress={handleCancelRequest}>
-                  <Text style={styles.appointmentBtnDangerText}>✕ Huỷ yêu cầu</Text>
+                  <IconText icon="close" style={styles.appointmentBtnDangerText}>Huỷ yêu cầu</IconText>
                 </TouchableOpacity>
               </View>
             </View>
@@ -363,7 +373,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {/* Ảnh hiện trạng (BEFORE) */}
         {(request.beforeImages?.length ?? request.images.length) > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🖼️ Ảnh hiện trạng</Text>
+            <IconText icon="image" style={styles.sectionTitle}>Ảnh hiện trạng</IconText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
               {(() => {
                 const uris = request.beforeImages?.length ? request.beforeImages : request.images;
@@ -371,8 +381,8 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   <TouchableOpacity key={i} activeOpacity={0.85} onPress={() => openAttachment(uris, uri)}>
                     {isVideoUrl(uri) ? (
                       <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
-                        <Text style={{ fontSize: 22 }}>🎬</Text>
-                        <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                        <Icon name="play" size={22} color={Colors.white} fill={Colors.white} />
+                        <Text style={styles.videoAttachmentText}>Xem video</Text>
                       </View>
                     ) : (
                       <Image source={{ uri }} style={styles.attachmentImage} />
@@ -388,9 +398,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {['tenant_fault', 'pending_tenant_repair', 'outstanding_damage'].includes(request.status) && (
           <View style={styles.section}>
             <View style={[styles.helpCard, { backgroundColor: '#FEF2F2' }]}>
-              <Text style={[styles.helpText, { color: '#B91C1C', fontWeight: '700', marginBottom: 4 }]}>
-                ⚠️ Quản lý xác định đây là lỗi do sử dụng
-              </Text>
+              <IconText icon="warning" style={[styles.helpText, { color: '#B91C1C', fontWeight: '700', marginBottom: 4 }]}>
+                Quản lý xác định đây là lỗi do sử dụng
+              </IconText>
               {!!request.faultReason && (
                 <Text style={[styles.helpText, { color: '#B91C1C' }]}>{request.faultReason}</Text>
               )}
@@ -402,8 +412,8 @@ export const MaintenanceDetailScreen: React.FC = () => {
                     onPress={() => openAttachment(request.faultEvidenceImages!, uri)}>
                     {isVideoUrl(uri) ? (
                       <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
-                        <Text style={{ fontSize: 22 }}>🎬</Text>
-                        <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                        <Icon name="play" size={22} color={Colors.white} fill={Colors.white} />
+                        <Text style={styles.videoAttachmentText}>Xem video</Text>
                       </View>
                     ) : (
                       <Image source={{ uri }} style={styles.attachmentImage} />
@@ -418,15 +428,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {/* Ảnh sau sửa (AFTER) — hiện khi manager đã báo xong */}
         {(request.afterImages?.length ?? 0) > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🛠 Ảnh sau sửa chữa</Text>
+            <IconText icon="wrench" style={styles.sectionTitle}>Ảnh sau sửa chữa</IconText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
               {request.afterImages!.map((uri, i) => (
                 <TouchableOpacity key={i} activeOpacity={0.85}
                   onPress={() => openAttachment(request.afterImages!, uri)}>
                   {isVideoUrl(uri) ? (
                     <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
-                      <Text style={{ fontSize: 22 }}>🎬</Text>
-                      <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                      <Icon name="play" size={22} color={Colors.white} fill={Colors.white} />
+                      <Text style={styles.videoAttachmentText}>Xem video</Text>
                     </View>
                   ) : (
                     <Image source={{ uri }} style={styles.attachmentImage} />
@@ -442,9 +452,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {hasTenantCharge && (
           <View style={styles.section}>
             <View style={[styles.payCard, { backgroundColor: billingHintMeta.bg, borderColor: billingHintMeta.color + '40' }]}>
-              <Text style={[styles.payCardTitle, { color: billingHintMeta.color }]}>
-                💳 {billingHintMeta.label}
-              </Text>
+              <IconText icon="card" style={[styles.payCardTitle, { color: billingHintMeta.color }]}>
+                {billingHintMeta.label}
+              </IconText>
               <Text style={[styles.payCardAmount, { color: billingHintMeta.color }]}>
                 {formatCurrency(request.issuedInvoice!.grandTotal)}
               </Text>
@@ -452,9 +462,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
                 {billingHintMeta.detail}
               </Text>
               {!!request.issuedInvoice!.dueDate && (
-                <Text style={[styles.payCardDetail, { color: billingHintMeta.color, fontWeight: '700' }]}>
-                  ⏰ Hạn thanh toán: {formatDate(request.issuedInvoice!.dueDate)}
-                </Text>
+                <IconText icon="clock" gap={5} style={[styles.payCardDetail, { color: billingHintMeta.color, fontWeight: '700' }]}>
+                  Hạn thanh toán: {formatDate(request.issuedInvoice!.dueDate)}
+                </IconText>
               )}
               {(request.invoiceImages?.length ?? 0) > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
@@ -467,7 +477,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
                 </ScrollView>
               )}
               <TouchableOpacity style={styles.payCardBtn} onPress={openPayModal}>
-                <Text style={styles.payCardBtnText}>📱 Quét QR thanh toán</Text>
+                <IconText icon="scan-qr" style={styles.payCardBtnText}>Quét QR thanh toán</IconText>
               </TouchableOpacity>
             </View>
           </View>
@@ -486,12 +496,12 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {request.status === 'pending_tenant_repair' && !hasSelfRepairPhotos && (
           <View style={styles.actionSection}>
             <View style={[styles.helpCard, { backgroundColor: '#FFF7ED', marginBottom: Spacing.md }]}>
-              <Text style={[styles.helpText, { color: '#C2410C' }]}>
-                🛠 Bạn cần tự sửa lỗi này{remainingDays != null
+              <IconText icon="hammer" multiline style={[styles.helpText, { color: '#C2410C' }]}>
+                Bạn cần tự sửa lỗi này{remainingDays != null
                   ? remainingDays >= 0 ? ` trong ${remainingDays} ngày nữa` : ' — ĐÃ QUÁ HẠN'
                   : ''}{request.selfRepairDeadline ? ` (hạn ${formatDate(request.selfRepairDeadline)})` : ''}.
                 Sửa xong thì chụp ảnh/video gửi để quản lý xác nhận.
-              </Text>
+              </IconText>
             </View>
             <Text style={styles.sectionTitle}>Ảnh/video chứng minh đã sửa xong</Text>
             <View style={styles.rejectImagesRow}>
@@ -509,7 +519,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
                       >
                         {isVideo ? (
                           <View style={[styles.rejectThumb, styles.videoRejectTile]}>
-                            <Text style={{ fontSize: 20 }}>🎬</Text>
+                            <Icon name="play" size={18} color={Colors.white} fill={Colors.white} />
                             <Text style={styles.videoRejectTileText}>{formatDurationLabel(asset.durationMs)}</Text>
                           </View>
                         ) : (
@@ -520,7 +530,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
                         style={styles.rejectThumbRemove}
                         onPress={() => setSelfRepairAssets(prev => prev.filter((_, idx) => idx !== i))}
                       >
-                        <Text style={styles.rejectThumbRemoveText}>×</Text>
+                        <Icon name="close" size={12} color={Colors.white} strokeWidth={3} />
                       </TouchableOpacity>
                     </View>
                   );
@@ -528,7 +538,8 @@ export const MaintenanceDetailScreen: React.FC = () => {
               })()}
               {selfRepairAssets.length < EVIDENCE_MAX_FILES && (
                 <TouchableOpacity style={styles.rejectAddBtn} onPress={() => setPhotoMenuOpen(true)}>
-                  <Text style={styles.rejectAddBtnText}>＋{'\n'}Ảnh/video</Text>
+                  <Icon name="plus" size={20} color={Colors.textMuted} />
+                  <Text style={styles.rejectAddBtnText}>Ảnh/video</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -541,7 +552,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
               multiline
             />
             <TouchableOpacity style={styles.confirmBtn} onPress={submitSelfRepair} disabled={busy}>
-              <Text style={styles.confirmBtnText}>{busy ? 'Đang gửi...' : '✅ Gửi ảnh đã sửa xong'}</Text>
+              <Text style={styles.confirmBtnText}>{busy ? 'Đang gửi...' : 'Gửi ảnh đã sửa xong'}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -550,7 +561,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {request.status === 'pending_tenant_repair' && hasSelfRepairPhotos && (
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
-              <Text style={styles.helpText}>⏳ Đã gửi ảnh sửa chữa — chờ quản lý kiểm tra và xác nhận.</Text>
+              <IconText icon="hourglass" multiline style={styles.helpText}>Đã gửi ảnh sửa chữa — chờ quản lý kiểm tra và xác nhận.</IconText>
             </View>
           </View>
         )}
@@ -559,13 +570,13 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {request.status === 'outstanding_damage' && (
           <View style={styles.actionSection}>
             <View style={[styles.helpCard, { backgroundColor: '#FEF2F2' }]}>
-              <Text style={[styles.helpText, { color: '#B91C1C' }]}>
-                💸 Chưa xử lý xong trong hạn — khoản thiệt hại này sẽ được chốt và trừ vào
+              <IconText icon="wallet" multiline style={[styles.helpText, { color: '#B91C1C' }]}>
+                Chưa xử lý xong trong hạn — khoản thiệt hại này sẽ được chốt và trừ vào
                 tiền cọc khi bạn trả phòng.
                 {request.estimatedDamageAmount != null
                   ? ` Ước tính: ${request.estimatedDamageAmount.toLocaleString('vi-VN')} đ.`
                   : ''}
-              </Text>
+              </IconText>
             </View>
           </View>
         )}
@@ -574,13 +585,13 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {request.status === 'waiting_payment' && (
           <View style={styles.actionSection}>
             <View style={[styles.helpCard, { backgroundColor: '#FFFBEB' }]}>
-              <Text style={[styles.helpText, { color: '#B45309' }]}>
-                💳 Quản lý đã sửa xong. Vui lòng thanh toán hoá đơn để hoàn tất yêu cầu
+              <IconText icon="card" multiline style={[styles.helpText, { color: '#B45309' }]}>
+                Quản lý đã sửa xong. Vui lòng thanh toán hoá đơn để hoàn tất yêu cầu
                 {request.issuedInvoice?.dueDate
                   ? ` — hạn ${formatDateTime(request.issuedInvoice.dueDate)}`
                   : ' (hạn 5 ngày kể từ lúc lập hoá đơn)'}.
                 Không tính phí trễ hạn, nhưng quá hạn quản lý được quyền đề nghị chấm dứt hợp đồng.
-              </Text>
+              </IconText>
             </View>
           </View>
         )}
@@ -590,15 +601,19 @@ export const MaintenanceDetailScreen: React.FC = () => {
           || request.status === 'in_repair' || request.status === 'tenant_fault') && (
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
-              <Text style={styles.helpText}>
+              <IconText
+                icon={request.status === 'open' ? 'hourglass' : request.status === 'repair_scheduled' ? 'calendar' : 'wrench'}
+                multiline
+                style={styles.helpText}
+              >
                 {request.status === 'open'
-                  ? '⏳ Yêu cầu đang chờ quản lý kiểm tra. Cần hỗ trợ gấp? Liên hệ quản lý.'
+                  ? 'Yêu cầu đang chờ quản lý kiểm tra. Cần hỗ trợ gấp? Liên hệ quản lý.'
                   : request.status === 'repair_scheduled'
-                    ? `📅 Đã lên lịch sửa${request.repairAppointmentAt ? `: ${formatDateTime(request.repairAppointmentAt)}` : ''}.`
+                    ? `Đã lên lịch sửa${request.repairAppointmentAt ? `: ${formatDateTime(request.repairAppointmentAt)}` : ''}.`
                     : request.status === 'tenant_fault'
-                      ? '🔧 Quản lý sẽ sửa hộ. Hoá đơn chi phí sẽ được gửi sau khi sửa xong — bạn có 5 ngày để thanh toán.'
-                      : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
-              </Text>
+                      ? 'Quản lý sẽ sửa hộ. Hoá đơn chi phí sẽ được gửi sau khi sửa xong — bạn có 5 ngày để thanh toán.'
+                      : 'Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
+              </IconText>
             </View>
           </View>
         )}
@@ -607,7 +622,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         {request.status === 'closed' && (
           <View style={styles.actionSection}>
             <TouchableOpacity style={styles.reopenBtnOutline} onPress={createFollowUp}>
-              <Text style={styles.reopenBtnOutlineText}>🔁 Vẫn chưa ổn — tạo yêu cầu mới</Text>
+              <IconText icon="refresh" style={styles.reopenBtnOutlineText}>Vẫn chưa ổn — tạo yêu cầu mới</IconText>
             </TouchableOpacity>
           </View>
         )}
@@ -626,15 +641,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
           <Pressable style={styles.photoMenuCard} onPress={() => {}}>
             <Text style={styles.photoMenuTitle}>Thêm ảnh/video</Text>
             <TouchableOpacity style={styles.photoMenuOption} onPress={() => pickFromCamera('image')}>
-              <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh</Text>
+              <IconText icon="camera" style={styles.photoMenuOptionText}>Chụp ảnh</IconText>
             </TouchableOpacity>
             {Platform.OS !== 'web' && (
               <TouchableOpacity style={styles.photoMenuOption} onPress={() => pickFromCamera('video')}>
-                <Text style={styles.photoMenuOptionText}>🎥 Quay video</Text>
+                <IconText icon="video" style={styles.photoMenuOptionText}>Quay video</IconText>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromLibrary}>
-              <Text style={styles.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+              <IconText icon="images" style={styles.photoMenuOptionText}>Chọn từ thư viện</IconText>
             </TouchableOpacity>
             <TouchableOpacity style={styles.photoMenuCancel} onPress={() => setPhotoMenuOpen(false)}>
               <Text style={styles.photoMenuCancelText}>Đóng</Text>
@@ -671,7 +686,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
               onPress={confirmReschedule}
               disabled={!rescheduleDate || !rescheduleTime || rescheduleBusy}
             >
-              <Text style={styles.confirmBtnText}>{rescheduleBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+              <Text style={styles.confirmBtnText}>{rescheduleBusy ? 'Đang lưu...' : 'Xác nhận lịch mới'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.photoMenuCancel} onPress={() => setRescheduleOpen(false)}>
               <Text style={styles.photoMenuCancelText}>Đóng</Text>
@@ -691,7 +706,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backBtnText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   scroll: { flex: 1 },
@@ -700,7 +715,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     margin: Spacing.base, padding: Spacing.md, borderRadius: BorderRadius.lg,
   },
-  statusEmoji: { fontSize: 28 },
+
   statusLabel: { fontSize: 16, fontWeight: '700' },
   statusDate: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   ticketCode: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
@@ -717,7 +732,7 @@ const styles = StyleSheet.create({
 
   infoCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, marginBottom: Spacing.md },
-  categoryEmoji: { fontSize: 28 },
+
   requestTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   requestCategory: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   priorityBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
@@ -790,12 +805,12 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 10,
     backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',
   },
-  rejectThumbRemoveText: { color: Colors.white, fontSize: 14, fontWeight: '900', lineHeight: 16 },
+
   rejectAddBtn: {
     width: 72, height: 72, borderRadius: BorderRadius.md, borderWidth: 1.5, borderStyle: 'dashed',
     borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
   },
-  rejectAddBtnText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 16 },
+  rejectAddBtnText: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', marginTop: 2 },
 
   photoMenuBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
   photoMenuCard: { backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, paddingBottom: Spacing.xl },

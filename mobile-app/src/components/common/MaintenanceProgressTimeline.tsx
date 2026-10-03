@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '@/constants';
 import { formatDateTime } from '@/utils';
 import { MAINTENANCE_STATUS_META, StatusMeta } from '@/constants/maintenance';
+import { Icon } from './Icon';
 
 /** Dùng chung cho tenant (MaintenanceTimeline) và manager (TimelineEntry) — 2 shape giống hệt nhau. */
 export interface MaintenanceTimelineEntry {
@@ -67,8 +68,8 @@ export const MaintenanceProgressTimeline: React.FC<{
           <View key={`${step.status}-${i}`} style={s.step}>
             <View style={s.stepLeft}>
               <View style={[s.dot, isCompleted && s.dotCompleted, isActive && s.dotActive]}>
-                {isCompleted && <Text style={s.dotCheck}>✓</Text>}
-                {isActive    && <Text style={s.dotActiveText}>{STATUS_CONFIG[step.status]?.icon}</Text>}
+                {isCompleted && <Icon name="check" size={16} color={Colors.white} strokeWidth={3} />}
+                {isActive    && <Icon name={STATUS_CONFIG[step.status]?.icon ?? 'clock'} size={16} color={Colors.white} />}
                 {!isCompleted && !isActive && <Text style={s.dotNum}>{i + 1}</Text>}
               </View>
               {i < steps.length - 1 && (
@@ -100,8 +101,7 @@ const s = StyleSheet.create({
   dot:             { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center' },
   dotCompleted:    { backgroundColor: Colors.success, borderColor: Colors.success },
   dotActive:       { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dotCheck:        { fontSize: 14, color: Colors.white, fontWeight: '700' },
-  dotActiveText:   { fontSize: 14 },
+
   dotNum:          { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
   line:            { width: 2, flex: 1, backgroundColor: Colors.border, marginVertical: 2 },
   lineCompleted:   { backgroundColor: Colors.success },

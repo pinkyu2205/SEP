@@ -22,6 +22,7 @@ import { Contract } from '@/types';
 import { showAlert } from '@/utils';
 import { useAuth, useOtpCooldown } from '@/hooks';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import { Icon, IconText } from '@/components/common/Icon';
 import {
   realTenantSelfService, ContractDetailDto, TenantHandoverResponse,
 } from '@/services/tenant/selfService';
@@ -177,7 +178,7 @@ export const ContractConfirmScreen: React.FC = () => {
         'Đã gửi mã xác nhận',
         'Bạn và quản lý mỗi người nhận một mã RIÊNG. Hai bên cùng nhập đúng thì hợp đồng có hiệu lực.',
         undefined,
-        '📩',
+        'sms',
       );
       await loadState();
     } catch (err: any) {
@@ -219,7 +220,7 @@ export const ContractConfirmScreen: React.FC = () => {
           'Đã ghi nhận xác nhận của bạn',
           'Còn chờ quản lý nhập mã của họ là hợp đồng có hiệu lực.',
           undefined,
-          '✅',
+          'success',
         );
       }
     } catch (err: any) {
@@ -257,7 +258,7 @@ export const ContractConfirmScreen: React.FC = () => {
 
       <ScrollView style={base.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.introBanner}>
-          <Text style={styles.introTitle}>📄 Vui lòng đọc kỹ hợp đồng</Text>
+          <IconText icon="document" style={styles.introTitle}>Vui lòng đọc kỹ hợp đồng</IconText>
           <Text style={styles.introText}>
             Sau khi bạn và quản lý cùng xác nhận bằng mã OTP, hợp đồng sẽ chính thức có
             hiệu lực và bạn được nhận phòng.
@@ -277,7 +278,7 @@ export const ContractConfirmScreen: React.FC = () => {
               style={base.actionBtnSecondary}
               onPress={() => Linking.openURL(contract.pdfUrl!)}
             >
-              <Text style={base.actionBtnSecondaryText}>📥 Xem bản PDF đầy đủ</Text>
+              <IconText icon="document" style={base.actionBtnSecondaryText}>Xem bản PDF đầy đủ</IconText>
             </TouchableOpacity>
           </View>
         )}
@@ -285,7 +286,7 @@ export const ContractConfirmScreen: React.FC = () => {
         <View style={styles.confirmCard}>
           {activated ? (
             <>
-              <Text style={styles.doneTitle}>🎉 Hợp đồng đã có hiệu lực</Text>
+              <IconText icon="success" style={styles.doneTitle}>Hợp đồng đã có hiệu lực</IconText>
               <Text style={styles.doneText}>
                 Chúc bạn ở vui vẻ! Từ giờ bạn xem hoá đơn và gửi yêu cầu ngay trong app.
               </Text>
@@ -298,7 +299,7 @@ export const ContractConfirmScreen: React.FC = () => {
             </>
           ) : tenantDone ? (
             <>
-              <Text style={styles.stepTitle}>✅ Bạn đã xác nhận</Text>
+              <IconText icon="success" iconColor={Colors.success} style={styles.stepTitle}>Bạn đã xác nhận</IconText>
               <View style={styles.waitRow}>
                 <ActivityIndicator size="small" color={Colors.primary} />
                 <Text style={styles.waitText}>Đang chờ quản lý nhập mã của họ…</Text>
@@ -351,7 +352,7 @@ export const ContractConfirmScreen: React.FC = () => {
                 activeOpacity={0.7}
               >
                 <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
-                  {agreed && <Text style={styles.checkboxTick}>✓</Text>}
+                  {agreed && <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />}
                 </View>
                 {/*
                   Câu tick bao GỘP CẢ HAI việc (01/09/2026): đồng ý hợp đồng, và xác nhận
@@ -410,7 +411,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.divider, alignItems: 'center', justifyContent: 'center',
   },
   checkboxOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  checkboxTick: { color: Colors.white, fontSize: 14, fontWeight: '800' },
+
   agreeText: { flex: 1, fontSize: 13, color: Colors.textPrimary, lineHeight: 20 },
 
   otpInput: {

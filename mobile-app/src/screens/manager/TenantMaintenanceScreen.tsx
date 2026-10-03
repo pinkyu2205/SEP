@@ -8,18 +8,19 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { Colors, Shadow } from '@/constants';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
 import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority } from '@/store/maintenanceStore';
+import { Dot, Icon, IconText } from '@/components/common/Icon';
 
 // ── Config — khớp BuildingMaintenanceScreen.tsx để 2 màn quản lý cùng bộ nhãn ──
 const STATUS_CFG = MAINTENANCE_STATUS_META;
-const CATEGORY_ICON = MAINTENANCE_CATEGORY_EMOJI;
+const CATEGORY_ICON = MAINTENANCE_CATEGORY_ICON;
 
 const PRIORITY_CFG: Record<TicketPriority, { label: string; color: string }> = {
-  urgent: { label: '🚨 Khẩn cấp', color: '#EF4444' },
-  high:   { label: '🔴 Cao',       color: '#F97316' },
-  medium: { label: '🟡 Trung bình', color: '#F59E0B' },
-  low:    { label: '🟢 Thấp',      color: '#10B981' },
+  urgent: { label: 'Khẩn cấp',   color: '#EF4444' },
+  high:   { label: 'Cao',        color: '#F97316' },
+  medium: { label: 'Trung bình', color: '#F59E0B' },
+  low:    { label: 'Thấp',       color: '#10B981' },
 };
 
 // Gom 6 status thật về 4 nhóm cho filter/stats (khớp BuildingMaintenanceScreen:
@@ -35,10 +36,10 @@ type FilterKey = 'all' | StatusBucket;
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',         label: 'Tất cả' },
-  { key: 'pending',     label: '⏳ Chờ' },
-  { key: 'in_progress', label: '🔧 Đang xử lý' },
-  { key: 'resolved',    label: '✅ Hoàn tất' },
-  { key: 'cancelled',   label: '✕ Đã hủy' },
+  { key: 'pending',     label: 'Chờ' },
+  { key: 'in_progress', label: 'Đang xử lý' },
+  { key: 'resolved',    label: 'Hoàn tất' },
+  { key: 'cancelled',   label: 'Đã hủy' },
 ];
 
 const isOpen = (t: MaintenanceTicket) => bucketOf(t.status) === 'pending' || bucketOf(t.status) === 'in_progress';
@@ -53,7 +54,7 @@ const fmtDate = (iso?: string): string => {
 const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> = ({ ticket, onPress }) => {
   const statusCfg = STATUS_CFG[ticket.status];
   const priCfg    = ticket.priority ? PRIORITY_CFG[ticket.priority] : undefined;
-  const catIcon   = ticket.category ? CATEGORY_ICON[ticket.category] : '🏷';
+  const catIcon   = (ticket.category && CATEGORY_ICON[ticket.category]) || 'tag';
   const open      = isOpen(ticket);
   const urgentOpen = open && ticket.priority === 'urgent';
 
@@ -67,7 +68,7 @@ const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> =
 
       <View style={tc.topRow}>
         <View style={tc.catBadge}>
-          <Text style={tc.catIcon}>{catIcon}</Text>
+          <Icon name={catIcon} size={18} color={Colors.primary} />
         </View>
         <View style={tc.topCenter}>
           <Text style={tc.title} numberOfLines={2}>{ticket.title}</Text>
@@ -81,10 +82,15 @@ const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> =
       <View style={tc.divider} />
 
       <View style={tc.footer}>
-        {priCfg && <Text style={[tc.priority, { color: priCfg.color }]}>{priCfg.label}</Text>}
+        {priCfg && (
+          <View style={tc.priorityRow}>
+            <Dot color={priCfg.color} size={7} />
+            <Text style={[tc.priority, { color: priCfg.color }]}>{priCfg.label}</Text>
+          </View>
+        )}
         <Text style={tc.date}>Cập nhật: {fmtDate(ticket.updatedAt)}</Text>
         {ticket.assignedTo && (
-          <Text style={tc.tech}>👷 {ticket.assignedTo}</Text>
+          <IconText icon="user" gap={3} style={tc.tech}>{ticket.assignedTo}</IconText>
         )}
       </View>
     </TouchableOpacity>
@@ -101,7 +107,7 @@ const tc = StyleSheet.create({
   urgentStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: '#DC2626' },
   topRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   catBadge: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  catIcon: { fontSize: 18 },
+  priorityRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   topCenter: { flex: 1 },
   title: { fontSize: 14, fontWeight: '700', color: '#0F172A', lineHeight: 20, marginBottom: 2 },
   code: { fontSize: 11, color: '#64748B' },
@@ -196,7 +202,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
       {/* Header */}
       <View style={ms.header}>
         <TouchableOpacity style={ms.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={ms.backBtnText}>‹</Text>
+          <Icon name="back" size={28} color="#0F172A" />
         </TouchableOpacity>
         <View style={ms.headerCenter}>
           <Text style={ms.title} numberOfLines={1}>Bảo trì của {tenantName}</Text>
@@ -225,7 +231,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
             {/* Urgent banner */}
             {hasUrgent && (
               <View style={ms.urgentBanner}>
-                <Text style={ms.urgentBannerText}>🚨 Có yêu cầu khẩn cấp cần xử lý ngay!</Text>
+                <IconText icon="siren" style={ms.urgentBannerText}>Có yêu cầu khẩn cấp cần xử lý ngay!</IconText>
               </View>
             )}
 
@@ -276,7 +282,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
             </View>
           ) : loadError ? (
             <View style={ms.empty}>
-              <Text style={ms.emptyIcon}>⚠️</Text>
+              <Icon name="alert" size={44} color={Colors.warning} strokeWidth={1.5} />
               <Text style={ms.emptyTitle}>Không tải được dữ liệu</Text>
               <TouchableOpacity style={ms.retryBtn} onPress={() => { setLoading(true); load(); }}>
                 <Text style={ms.retryBtnText}>Thử lại</Text>
@@ -284,7 +290,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
             </View>
           ) : (
             <View style={ms.empty}>
-              <Text style={ms.emptyIcon}>🔧</Text>
+              <Icon name="wrench" size={44} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={ms.emptyTitle}>Không có yêu cầu nào</Text>
               <Text style={ms.emptyDesc}>
                 {activeFilter === 'all'
@@ -313,7 +319,7 @@ const ms = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   backBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  backBtnText: { fontSize: 28, color: '#0F172A', lineHeight: 32 },
+
   headerCenter: { flex: 1 },
   title: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
   subtitle: { fontSize: 12, color: '#64748B', marginTop: 1 },
@@ -356,7 +362,7 @@ const ms = StyleSheet.create({
   filterBadgeTextActive: { color: '#FFFFFF' },
 
   empty: { alignItems: 'center', paddingTop: 64, gap: 8 },
-  emptyIcon: { fontSize: 44 },
+
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
   emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
   retryBtn: {

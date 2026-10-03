@@ -16,36 +16,37 @@ import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 import { UtilityEvidenceCard } from '@/components/invoice/UtilityEvidenceCard';
 import { InvoiceDisputeModal } from '@/components/invoice/InvoiceDisputeModal';
+import { Dot, Icon, IconText, type IconName } from '@/components/common/Icon';
 import {
   canDisputeInvoice, isDisputeOpen, disputeReasonLabel, DISPUTE_REJECT_GRACE_DAYS,
   type InvoiceDispute,
 } from '@/types/invoiceDispute';
 
 // ── Config maps ─────────────────────────────────────────────
-const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string; gradientTop: string }> = {
-  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF', gradientTop: '#7C3AED' },
-  electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
-  water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
-  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
+const TYPE_CFG: Record<InvoiceType, { label: string; icon: IconName; color: string; bg: string; gradientTop: string }> = {
+  rent:        { label: 'Tiền phòng', icon: 'home',     color: '#7C3AED', bg: '#F5F3FF', gradientTop: '#7C3AED' },
+  electricity: { label: 'Tiền điện',  icon: 'electric', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
+  water:       { label: 'Tiền nước',  icon: 'water',    color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
+  maintenance: { label: 'Phí bảo trì', icon: 'wrench',  color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
   // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts),
   // nên nhãn không được để mỗi chữ "Tiền cọc".
-  deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
+  deposit:     { label: 'Thu khi nhận phòng', icon: 'deposit', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
 };
 
-const STATUS_CFG: Record<BillStatus, { label: string; color: string; bg: string; emoji: string }> = {
-  pending:   { label: 'Chờ thanh toán',    color: Colors.warning,   bg: Colors.warningLight,  emoji: '🕐' },
-  paid:      { label: 'Đã thanh toán',     color: Colors.success,   bg: Colors.successLight,  emoji: '✅' },
-  overdue:   { label: 'Quá hạn',           color: Colors.error,     bg: Colors.errorLight,    emoji: '⚠️' },
-  partial:   { label: 'Thanh toán 1 phần', color: Colors.info,      bg: Colors.infoLight,     emoji: '💸' },
-  cancelled: { label: 'Đã huỷ',           color: Colors.textMuted, bg: Colors.background,    emoji: '🚫' },
+const STATUS_CFG: Record<BillStatus, { label: string; color: string; bg: string; icon: IconName }> = {
+  pending:   { label: 'Chờ thanh toán',    color: Colors.warning,   bg: Colors.warningLight,  icon: 'clock' },
+  paid:      { label: 'Đã thanh toán',     color: Colors.success,   bg: Colors.successLight,  icon: 'success' },
+  overdue:   { label: 'Quá hạn',           color: Colors.error,     bg: Colors.errorLight,    icon: 'warning' },
+  partial:   { label: 'Thanh toán 1 phần', color: Colors.info,      bg: Colors.infoLight,     icon: 'wallet' },
+  cancelled: { label: 'Đã huỷ',           color: Colors.textMuted, bg: Colors.background,    icon: 'ban' },
 };
 
 const METHOD_LABEL: Record<string, string> = {
-  qr:            '📱 QR Code / VietQR',
-  bank_transfer: '🏦 Chuyển khoản ngân hàng',
-  cash:          '💵 Tiền mặt',
-  ewallet:       '💳 Ví điện tử',
-  other:         '💳 Khác',
+  qr:            'QR Code / VietQR',
+  bank_transfer: 'Chuyển khoản ngân hàng',
+  cash:          'Tiền mặt',
+  ewallet:       'Ví điện tử',
+  other:         'Khác',
 };
 
 // ── Sub-components ──────────────────────────────────────────
@@ -255,17 +256,17 @@ export const InvoiceDetailScreen: React.FC = () => {
       {/* ── Hero header ── */}
       <View style={[s.hero, { backgroundColor: tc.gradientTop }]}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backIcon}>←</Text>
+          <Icon name="back" size={22} color={Colors.white} />
         </TouchableOpacity>
 
         <View style={s.heroBody}>
-          <Text style={s.heroIcon}>{tc.icon}</Text>
+          <Icon name={tc.icon} size={40} color={Colors.white} strokeWidth={1.6} style={s.heroIcon} />
           <Text style={s.heroLabel}>{tc.label}</Text>
           {!!periodLabel && <Text style={s.heroMonth}>{periodLabel}</Text>}
           <Text style={s.heroAmount}>{formatCurrency(invoice.grandTotal)}</Text>
 
           <View style={[s.statusBadge, { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
-            <Text style={s.statusText}>{sc.emoji} {sc.label}</Text>
+            <IconText icon={sc.icon} gap={5} style={s.statusText}>{sc.label}</IconText>
           </View>
         </View>
 
@@ -288,11 +289,16 @@ export const InvoiceDetailScreen: React.FC = () => {
             dispute.status === 'ACCEPTED' && s.disputeBannerOk,
             dispute.status === 'REJECTED' && s.disputeBannerClosed,
           ]}>
-            <Text style={s.disputeBannerTitle}>
-              {dispute.status === 'OPEN'     && '⏳ Đang tra soát theo yêu cầu của bạn'}
-              {dispute.status === 'ACCEPTED' && '✅ Đã xác nhận hoá đơn này sai'}
-              {dispute.status === 'REJECTED' && 'ℹ️ Đã tra soát xong — hoá đơn giữ nguyên'}
-            </Text>
+            <IconText
+              icon={dispute.status === 'OPEN' ? 'hourglass' : dispute.status === 'ACCEPTED' ? 'success' : 'info'}
+              iconColor={dispute.status === 'OPEN' ? '#B45309' : dispute.status === 'ACCEPTED' ? Colors.success : Colors.textMuted}
+              multiline
+              style={s.disputeBannerTitle}
+            >
+              {dispute.status === 'OPEN'     && 'Đang tra soát theo yêu cầu của bạn'}
+              {dispute.status === 'ACCEPTED' && 'Đã xác nhận hoá đơn này sai'}
+              {dispute.status === 'REJECTED' && 'Đã tra soát xong — hoá đơn giữ nguyên'}
+            </IconText>
 
             <Text style={s.disputeBannerReason}>
               Bạn báo: {disputeReasonLabel(dispute.reason)}
@@ -348,7 +354,7 @@ export const InvoiceDetailScreen: React.FC = () => {
         {/* ── Overdue alert ── */}
         {isOverdue && !disputePending && (
           <View style={s.overdueAlert}>
-            <Text style={s.overdueIcon}>🚨</Text>
+            <Icon name="alert" size={20} color={Colors.error} />
             <View style={{ flex: 1 }}>
               <Text style={s.overdueText}>
                 Đã quá hạn {daysOver} ngày (hạn: {formatDate(invoice.dueDate)})
@@ -377,7 +383,7 @@ export const InvoiceDetailScreen: React.FC = () => {
 
         {/* ── Thông tin hóa đơn ── */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>📋 Thông tin hóa đơn</Text>
+          <Text style={s.sectionTitle}>Thông tin hóa đơn</Text>
           <View style={s.card}>
             <InfoRow label="Phòng"        value={invoice.roomName} />
             <InfoRow label="Tòa nhà"      value={invoice.propertyName} />
@@ -400,7 +406,7 @@ export const InvoiceDetailScreen: React.FC = () => {
         {/* ── Utility details (điện/nước) ── */}
         {invoice.invoiceType === 'electricity' && invoice.kwhUsed !== undefined && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>⚡ Chi tiết điện</Text>
+            <Text style={s.sectionTitle}>Chi tiết điện</Text>
             <View style={s.card}>
               {invoice.billingPeriod && (
                 <InfoRow label="Kỳ ghi chỉ số" value={invoice.billingPeriod} />
@@ -417,7 +423,7 @@ export const InvoiceDetailScreen: React.FC = () => {
 
         {invoice.invoiceType === 'water' && invoice.m3Used !== undefined && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>💧 Chi tiết nước</Text>
+            <Text style={s.sectionTitle}>Chi tiết nước</Text>
             <View style={s.card}>
               {invoice.billingPeriod && (
                 <InfoRow label="Kỳ ghi chỉ số" value={invoice.billingPeriod} />
@@ -448,7 +454,7 @@ export const InvoiceDetailScreen: React.FC = () => {
               onPress={() => setDisputeOpen(true)}
               activeOpacity={0.85}
             >
-              <Text style={s.disputeCtaIcon}>🚩</Text>
+              <Icon name="flag" size={20} color="#D97706" />
               <View style={{ flex: 1 }}>
                 <Text style={s.disputeCtaTitle}>Hoá đơn này không đúng?</Text>
                 <Text style={s.disputeCtaSub}>
@@ -457,7 +463,7 @@ export const InvoiceDetailScreen: React.FC = () => {
                     : 'Gửi yêu cầu tra soát. Hoá đơn tạm ngừng tính quá hạn trong lúc chờ.'}
                 </Text>
               </View>
-              <Text style={s.disputeCtaArrow}>›</Text>
+              <Icon name="chevron-right" size={20} color={Colors.textMuted} />
             </TouchableOpacity>
           </View>
         )}
@@ -469,7 +475,7 @@ export const InvoiceDetailScreen: React.FC = () => {
             Hoá đơn cũ không có `paymentBreakdown` thì khối này tự ẩn. */}
         {!!breakdown && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>🧮 Cách tính</Text>
+            <Text style={s.sectionTitle}>Cách tính</Text>
             <View style={s.card}>
               <View style={s.breakdownHead}>
                 <Text style={s.breakdownTitle}>{breakdown.title}</Text>
@@ -498,7 +504,7 @@ export const InvoiceDetailScreen: React.FC = () => {
 
         {/* ── Chi tiết khoản thu ── */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>🧾 Chi tiết khoản thu</Text>
+          <Text style={s.sectionTitle}>Chi tiết khoản thu</Text>
           <View style={s.card}>
             {itemsConsistent ? (
               invoice.items.map((item, i) => (
@@ -524,7 +530,7 @@ export const InvoiceDetailScreen: React.FC = () => {
             )}
             {(invoice.lateFee ?? 0) > 0 && (
               <InfoRow
-                label="⚠️ Phí trả chậm"
+                label="Phí trả chậm"
                 value={`+${formatCurrency(invoice.lateFee)}`}
                 labelStyle={{ color: Colors.error }}
                 valueStyle={{ color: Colors.error }}
@@ -543,7 +549,7 @@ export const InvoiceDetailScreen: React.FC = () => {
         {/* ── Thông tin thanh toán (paid) ── */}
         {isPaid && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>💳 Thông tin thanh toán</Text>
+            <Text style={s.sectionTitle}>Thông tin thanh toán</Text>
             <View style={s.card}>
               {invoice.paidAt && (
                 <InfoRow label="Ngày thanh toán" value={formatDate(invoice.paidAt)} />
@@ -559,7 +565,7 @@ export const InvoiceDetailScreen: React.FC = () => {
               )}
             </View>
             <View style={s.paidBanner}>
-              <Text style={s.paidBannerText}>✅ Hóa đơn đã được thanh toán đầy đủ</Text>
+              <IconText icon="success" style={s.paidBannerText}>Hóa đơn đã được thanh toán đầy đủ</IconText>
             </View>
           </View>
         )}
@@ -567,7 +573,7 @@ export const InvoiceDetailScreen: React.FC = () => {
         {/* ── Trạng thái timeline (chưa trả) ── */}
         {!isPaid && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>⏱ Trạng thái</Text>
+            <Text style={s.sectionTitle}>Trạng thái</Text>
             <View style={s.card}>
               {[
                 { key: 'created', label: 'Phát hành', done: true },
@@ -582,9 +588,9 @@ export const InvoiceDetailScreen: React.FC = () => {
                       step.active && { backgroundColor: Colors.warning },
                       !step.done && !step.active && { backgroundColor: Colors.border },
                     ]}>
-                      <Text style={{ fontSize: 10, color: Colors.white }}>
-                        {step.done ? '✓' : step.active ? '●' : '○'}
-                      </Text>
+                      {step.done
+                        ? <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />
+                        : step.active ? <Dot color={Colors.white} size={8} /> : null}
                     </View>
                     <Text style={[s.timelineLabel, (step.done || step.active) && { color: Colors.textPrimary, fontWeight: '600' }]}>
                       {step.label}
@@ -603,13 +609,17 @@ export const InvoiceDetailScreen: React.FC = () => {
         {canPay && (
           <View style={[s.section, { marginBottom: 100 }]}>
             <View style={[s.reminderBanner, isOverdue && !disputePending && s.reminderBannerOverdue]}>
-              <Text style={[s.reminderText, isOverdue && !disputePending && { color: Colors.error }]}>
+              <IconText
+                icon={disputePending ? 'pause' : isOverdue ? 'alert' : 'calendar'}
+                multiline
+                style={[s.reminderText, isOverdue && !disputePending && { color: Colors.error }]}
+              >
                 {disputePending
-                  ? '⏸ Đang tra soát — hạn thanh toán tạm dừng, bạn chưa cần trả'
+                  ? 'Đang tra soát — hạn thanh toán tạm dừng, bạn chưa cần trả'
                   : isOverdue
-                    ? `🚨 Đã quá hạn ${daysOver} ngày — vui lòng thanh toán ngay`
-                    : `📅 Vui lòng thanh toán trước ${formatDate(invoice.dueDate)}`}
-              </Text>
+                    ? `Đã quá hạn ${daysOver} ngày — vui lòng thanh toán ngay`
+                    : `Vui lòng thanh toán trước ${formatDate(invoice.dueDate)}`}
+              </IconText>
             </View>
           </View>
         )}
@@ -631,9 +641,7 @@ export const InvoiceDetailScreen: React.FC = () => {
             activeOpacity={0.85}
           >
             <Text style={s.payBtnText}>
-              {disputePending
-                ? '💳 Vẫn muốn thanh toán'
-                : isOverdue ? '🚨 Thanh toán ngay' : '💳 Thanh toán ngay'}
+              {disputePending ? 'Vẫn muốn thanh toán' : 'Thanh toán ngay'}
             </Text>
             <Text style={s.payBtnAmount}>{formatCurrency(invoice.grandTotal)}</Text>
           </TouchableOpacity>
@@ -695,9 +703,9 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     marginBottom: Spacing.md,
   },
-  backIcon: { fontSize: 20, color: Colors.white, lineHeight: 24 },
+
   heroBody: { alignItems: 'center', paddingBottom: Spacing.sm },
-  heroIcon:   { fontSize: 44, marginBottom: 6 },
+  heroIcon:   { marginBottom: 8 },
   heroLabel:  { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: 0.6 },
   heroMonth:  { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2, marginBottom: 10 },
   heroAmount: { fontSize: 36, fontWeight: '900', color: Colors.white, marginBottom: 12 },
@@ -718,7 +726,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.lg,
     padding: Spacing.base, marginBottom: Spacing.md,
   },
-  overdueIcon: { fontSize: 20 },
+
   overdueText: { fontSize: 13, fontWeight: '600', color: Colors.error, flex: 1, lineHeight: 20 },
   overdueSub:  { fontSize: 12, fontWeight: '600', color: Colors.error, opacity: 0.85, marginTop: 4, lineHeight: 17 },
 
@@ -821,10 +829,10 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
     borderWidth: 1, borderColor: Colors.border,
   },
-  disputeCtaIcon:  { fontSize: 20 },
+
   disputeCtaTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   disputeCtaSub:   { fontSize: 12, color: Colors.textMuted, marginTop: 3, lineHeight: 17 },
-  disputeCtaArrow: { fontSize: 22, color: Colors.textMuted, fontWeight: '300' },
+
 
   // ── Xem ảnh bằng chứng cỡ lớn ──
   zoomOverlay: {

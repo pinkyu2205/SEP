@@ -3,22 +3,23 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { useAuth } from '@/hooks';
+import { Icon, type IconName } from '@/components/common/Icon';
 
 const { width } = Dimensions.get('window');
 
-const TUTORIAL_DATA = [
+const TUTORIAL_DATA: { icon: IconName; title: string; desc: string }[] = [
   {
-    emoji: '🧾',
+    icon: 'receipt',
     title: 'Hóa Đơn & Thanh Toán',
     desc: 'Theo dõi chi tiết tiền phòng, điện nước hàng tháng. Thanh toán nhanh chóng và chính xác 100% bằng cách quét mã VietQR.',
   },
   {
-    emoji: '🔧',
+    icon: 'wrench',
     title: 'Báo Cáo Sự Cố Dễ Dàng',
     desc: 'Hỏng máy lạnh? Vòi nước rỉ? Chỉ cần quét mã QR trên thiết bị, chụp ảnh và gửi yêu cầu sửa chữa ngay trên ứng dụng.',
   },
   {
-    emoji: '📝',
+    icon: 'contract',
     title: 'Hợp Đồng Điện Tử',
     desc: 'Tra cứu thông tin hợp đồng, tiền cọc và lịch sử đóng tiền bất cứ lúc nào, bất cứ nơi đâu. An toàn, minh bạch.',
   },
@@ -70,8 +71,8 @@ export const TutorialScreen: React.FC = () => {
       >
         {TUTORIAL_DATA.map((item, index) => (
           <View key={index} style={[styles.page, { width }]}>
-            <View style={styles.emojiContainer}>
-              <Text style={styles.emoji}>{item.emoji}</Text>
+            <View style={styles.iconContainer}>
+              <Icon name={item.icon} size={64} color={Colors.primary} strokeWidth={1.4} />
             </View>
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.desc}>{item.desc}</Text>
@@ -110,7 +111,7 @@ const styles = StyleSheet.create({
   pagerView: { flex: 1 },
   page: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing['2xl'] },
   
-  emojiContainer: {
+  iconContainer: {
     width: 150, height: 150,
     backgroundColor: Colors.primaryBg,
     borderRadius: 75,
@@ -118,7 +119,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing['2xl'],
   },
-  emoji: { fontSize: 80 },
+
   title: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.lg, textAlign: 'center' },
   desc: { fontSize: 16, color: Colors.textSecondary, textAlign: 'center', lineHeight: 24 },
 

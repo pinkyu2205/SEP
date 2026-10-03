@@ -19,6 +19,7 @@ import {
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * HOÁ ĐƠN TIỀN NHÀ — một màn duy nhất cho cả kỳ thu.
@@ -49,12 +50,12 @@ import { serverNow, todayIso } from '@/utils/serverTime';
  * "Tiền khách đã trả" (ManagerPaymentHistory).
  */
 
-const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
-  QR:            { label: 'QR VietQR',    icon: '📱' },
-  BANK_TRANSFER: { label: 'Chuyển khoản', icon: '🏦' },
-  CASH:          { label: 'Tiền mặt',     icon: '💵' },
-  EWALLET:       { label: 'Ví điện tử',   icon: '👛' },
-  OTHER:         { label: 'Khác',         icon: '💳' },
+const METHOD_CONFIG: Record<string, { label: string; icon: IconName }> = {
+  QR:            { label: 'QR VietQR',    icon: 'qr' },
+  BANK_TRANSFER: { label: 'Chuyển khoản', icon: 'bank' },
+  CASH:          { label: 'Tiền mặt',     icon: 'cash' },
+  EWALLET:       { label: 'Ví điện tử',   icon: 'wallet' },
+  OTHER:         { label: 'Khác',         icon: 'card' },
 };
 const methodOf = (m: string) => METHOD_CONFIG[(m || '').toUpperCase()] ?? METHOD_CONFIG.OTHER;
 
@@ -93,16 +94,16 @@ const lateDays = (dueDate?: string | null) => {
 type StatusKey = 'all' | 'PAID' | 'PENDING' | 'OVERDUE';
 
 /** Trạng thái một hoá đơn, quy về đúng thứ manager cần thấy trên một dòng. */
-const rowState = (inv: ManagerInvoice) => {
+const rowState = (inv: ManagerInvoice): { icon: IconName; label: string; color: string; bg: string } => {
   if (inv.status === 'PAID') {
-    return { icon: '✓', label: 'Đã thu', color: Colors.success, bg: Colors.successLight };
+    return { icon: 'check', label: 'Đã thu', color: Colors.success, bg: Colors.successLight };
   }
   const late = lateDays(inv.dueDate);
   if (inv.status === 'OVERDUE' || late > 0) {
-    return { icon: '🔴', label: `Trễ ${late} ngày`, color: Colors.error, bg: Colors.errorLight };
+    return { icon: 'alert', label: `Trễ ${late} ngày`, color: Colors.error, bg: Colors.errorLight };
   }
   return {
-    icon: '⏰',
+    icon: 'clock',
     label: late === 0 ? 'Hạn hôm nay' : `Còn ${-late} ngày`,
     color: Colors.warning,
     bg: Colors.warningLight,
@@ -377,7 +378,7 @@ export const BillingManagementScreen: React.FC = () => {
       {/* ── Header: quay lại · tiêu đề · chọn kỳ ── */}
       <View style={s.header}>
         <TouchableOpacity onPress={handleBack} style={s.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={s.backIcon}>‹</Text>
+          <Icon name="back" size={24} color={Colors.primary} />
         </TouchableOpacity>
         <View style={s.headerMid}>
           <Text style={s.h1}>Hoá đơn tiền nhà</Text>
@@ -388,11 +389,11 @@ export const BillingManagementScreen: React.FC = () => {
           */}
           <View style={s.monthRow}>
             <TouchableOpacity onPress={() => setMonth(m => shiftMonthKey(m, -1))} style={s.monthBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={s.monthArrow}>‹</Text>
+              <Icon name="chevron-left" size={18} color={Colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setMonthPickerOpen(true)} style={s.monthPick} activeOpacity={0.7}>
               <Text style={s.monthText}>{monthLabelOf(month)}</Text>
-              <Text style={s.monthCaret}>▾</Text>
+              <Icon name="chevron-down" size={13} color={Colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => !atCurrentMonth && setMonth(m => shiftMonthKey(m, 1))}
@@ -400,7 +401,7 @@ export const BillingManagementScreen: React.FC = () => {
               style={s.monthBtn}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={[s.monthArrow, atCurrentMonth && s.monthArrowOff]}>›</Text>
+              <Icon name="chevron-right" size={18} color={atCurrentMonth ? Colors.textMuted : Colors.primary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -422,7 +423,7 @@ export const BillingManagementScreen: React.FC = () => {
         */}
         {hasAnyThisPeriod && (
           <View style={s.searchWrap}>
-            <Text style={s.searchIcon}>🔍</Text>
+            <Icon name="search" size={15} color={Colors.textMuted} />
             <TextInput
               style={s.searchInput}
               placeholder="Tìm nhà, phòng, khách thuê…"
@@ -433,7 +434,7 @@ export const BillingManagementScreen: React.FC = () => {
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={s.searchClear}>✕</Text>
+                <Icon name="close" size={15} color={Colors.textMuted} style={s.searchClear} />
               </TouchableOpacity>
             )}
           </View>
@@ -468,7 +469,7 @@ export const BillingManagementScreen: React.FC = () => {
         {/* ── Cần xử lý: khách quá hạn ── */}
         {needAction.length > 0 && (
           <View style={[s.card, s.cardDanger]}>
-            <Text style={s.sectionTitle}>🔴 Cần gọi nhắc ({needAction.length})</Text>
+            <IconText icon="phone" iconColor={Colors.error} style={s.sectionTitle}>Cần gọi nhắc ({needAction.length})</IconText>
             {needAction.slice(0, 5).map(i => (
               <TouchableOpacity key={i.id} style={s.actionRow} onPress={() => setSheetRow(i)} activeOpacity={0.7}>
                 <View style={s.flex1}>
@@ -478,7 +479,7 @@ export const BillingManagementScreen: React.FC = () => {
                   <Text style={s.actionSub} numberOfLines={1}>{i.propertyName}</Text>
                 </View>
                 <Text style={s.actionLate}>trễ {lateDays(i.dueDate)} ngày</Text>
-                <Text style={s.chev}>›</Text>
+                <Icon name="chevron-right" size={18} color={Colors.textMuted} />
               </TouchableOpacity>
             ))}
             {needAction.length > 5 && (
@@ -499,7 +500,7 @@ export const BillingManagementScreen: React.FC = () => {
               return (
                 <View key={h.id} style={s.house}>
                   <TouchableOpacity style={s.houseHead} onPress={() => toggleHouse(h.id)} activeOpacity={0.7}>
-                    <Text style={s.houseCaret}>{open ? '▾' : '▸'}</Text>
+                    <Icon name={open ? 'chevron-down' : 'chevron-right'} size={15} color={Colors.textMuted} />
                     <View style={s.flex1}>
                       <Text style={s.houseName} numberOfLines={1}>{h.name}</Text>
                       <Text style={s.houseSub}>
@@ -549,7 +550,7 @@ export const BillingManagementScreen: React.FC = () => {
             <View style={s.txHead}>
               <Text style={s.sectionTitleOut}>Giao dịch gần đây</Text>
               <TouchableOpacity onPress={() => navigation.navigate('ManagerPaymentHistory')}>
-                <Text style={s.link}>Xem tất cả ›</Text>
+                <IconText icon="chevron-right" trailing gap={2} style={s.link}>Xem tất cả</IconText>
               </TouchableOpacity>
             </View>
             <View style={s.card}>
@@ -557,14 +558,14 @@ export const BillingManagementScreen: React.FC = () => {
                 const m = methodOf(p.method);
                 return (
                   <View key={p.id} style={s.txRow}>
-                    <Text style={s.txIcon}>{m.icon}</Text>
+                    <Icon name={m.icon} size={16} color={Colors.textSecondary} />
                     <View style={s.flex1}>
                       <Text style={s.txName} numberOfLines={1}>
                         {p.tenantName}{p.roomNumber ? ` · ${p.roomNumber}` : ''}
                       </Text>
                       <Text style={s.txSub} numberOfLines={1}>{m.label} · {fmtWhen(p.verifiedAt || p.createdAt)}</Text>
                     </View>
-                    <Text style={s.txOk}>✓</Text>
+                    <Icon name="check" size={16} color={Colors.success} strokeWidth={2.5} />
                   </View>
                 );
               })}
@@ -580,7 +581,7 @@ export const BillingManagementScreen: React.FC = () => {
         */}
         {houses.length === 0 && (
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>🧾</Text>
+            <Icon name="receipt" size={34} color={Colors.textMuted} strokeWidth={1.5} style={s.emptyIcon} />
             {!hasAnyThisPeriod ? (
               <>
                 <Text style={s.emptyTitle}>Kỳ này chưa có hoá đơn</Text>
@@ -630,7 +631,7 @@ export const BillingManagementScreen: React.FC = () => {
                   <Text style={[s.monthItemCount, o.count === 0 && s.monthItemEmpty]}>
                     {o.count === 0 ? 'chưa có' : `${o.count} hoá đơn`}
                   </Text>
-                  {active && <Text style={s.monthItemTick}>✓</Text>}
+                  {active && <Icon name="check" size={17} color={Colors.primary} strokeWidth={2.5} />}
                 </TouchableOpacity>
               );
             })}
@@ -659,7 +660,7 @@ export const BillingManagementScreen: React.FC = () => {
                 </Text>
 
                 <View style={[s.sheetState, { backgroundColor: st.bg }]}>
-                  <Text style={[s.sheetStateText, { color: st.color }]}>{st.icon}  {st.label}</Text>
+                  <IconText icon={st.icon} gap={5} style={[s.sheetStateText, { color: st.color }]}>{st.label}</IconText>
                 </View>
 
                 <View style={s.sheetInfo}>
@@ -686,9 +687,9 @@ export const BillingManagementScreen: React.FC = () => {
                     disabled={terminating}
                     onPress={() => handleTerminate(sheetRow)}
                   >
-                    <Text style={s.sheetDangerText}>
-                      {terminating ? 'Đang xử lý…' : '⚠️  Đề nghị chấm dứt hợp đồng'}
-                    </Text>
+                    {terminating
+                      ? <Text style={s.sheetDangerText}>Đang xử lý…</Text>
+                      : <IconText icon="warning" style={s.sheetDangerText}>Đề nghị chấm dứt hợp đồng</IconText>}
                   </TouchableOpacity>
                 ) : sheetRow.status !== 'PAID' && (
                   /*
@@ -731,20 +732,19 @@ const s = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  backIcon: { fontSize: 22, lineHeight: 24, color: Colors.primary, fontWeight: '800' },
+
   headerMid: { flex: 1 },
   h1: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
   monthRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
   monthBtn: { paddingHorizontal: 4 },
-  monthArrow: { fontSize: 18, lineHeight: 20, color: Colors.primary, fontWeight: '800' },
-  monthArrowOff: { color: Colors.textMuted },
+
   monthPick: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: 999, backgroundColor: Colors.primaryBg,
   },
   monthText: { fontSize: 13, fontWeight: '800', color: Colors.primary, textAlign: 'center' },
-  monthCaret: { fontSize: 10, color: Colors.primary },
+
 
   // ── Danh sách chọn kỳ ──
   monthList: { marginTop: Spacing.md, maxHeight: 340 },
@@ -758,7 +758,7 @@ const s = StyleSheet.create({
   monthItemTextOn: { color: Colors.primary, fontWeight: '900' },
   monthItemCount: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   monthItemEmpty: { color: Colors.textMuted, fontStyle: 'italic', fontWeight: '500' },
-  monthItemTick: { fontSize: 15, fontWeight: '900', color: Colors.primary },
+
 
   // ── Tìm kiếm ──
   searchWrap: {
@@ -767,9 +767,9 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.md, height: 44, marginBottom: Spacing.md,
     borderWidth: 1, borderColor: Colors.border,
   },
-  searchIcon: { fontSize: 14 },
+
   searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
-  searchClear: { fontSize: 14, color: Colors.textMuted, paddingHorizontal: 4 },
+  searchClear: { marginHorizontal: 4 },
 
   // ── Thẻ ──
   card: {
@@ -823,7 +823,7 @@ const s = StyleSheet.create({
   actionName: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   actionSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
   actionLate: { fontSize: 12, fontWeight: '800', color: Colors.error },
-  chev: { fontSize: 18, color: Colors.textMuted },
+
   moreHint: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm, fontStyle: 'italic' },
 
   // ── Theo nhà ──
@@ -832,7 +832,7 @@ const s = StyleSheet.create({
     marginBottom: Spacing.sm, overflow: 'hidden', ...Shadow.sm,
   },
   houseHead: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: Spacing.md },
-  houseCaret: { fontSize: 13, color: Colors.textMuted, width: 12 },
+
   houseName: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   houseSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   houseHistory: { fontSize: 11, fontWeight: '700', color: Colors.primary },
@@ -851,17 +851,17 @@ const s = StyleSheet.create({
   txHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   link: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  txIcon: { fontSize: 16 },
+
   txName: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   txSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
-  txOk: { fontSize: 14, color: Colors.success, fontWeight: '900' },
+
 
   // ── Rỗng ──
   empty: {
     backgroundColor: Colors.surface, borderRadius: BorderRadius.lg,
     padding: Spacing.xl, alignItems: 'center', ...Shadow.sm,
   },
-  emptyIcon: { fontSize: 34, marginBottom: Spacing.sm },
+  emptyIcon: { marginBottom: Spacing.sm },
   emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
   emptyText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
   emptyBtn: {

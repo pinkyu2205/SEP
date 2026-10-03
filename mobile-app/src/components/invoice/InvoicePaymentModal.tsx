@@ -10,6 +10,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { billMonthLabel, formatCurrency, formatDate, showAlert } from '@/utils';
 import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * Modal thanh toán hoá đơn dùng chung cho InvoiceListScreen (thanh toán ngay từ danh
@@ -20,12 +21,12 @@ import { realTenantBillingService, toSharedBill } from '@/services/tenant/billin
  * chiếu thật với PayOS thay vì tạo claim chờ manager duyệt tay.
  */
 
-const TYPE_LABEL: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
-  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
+const TYPE_LABEL: Record<InvoiceType, { label: string; icon: IconName; color: string; bg: string }> = {
+  rent:        { label: 'Tiền phòng', icon: 'home',     color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Tiền điện',  icon: 'electric', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Tiền nước',  icon: 'water',    color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí bảo trì', icon: 'wrench',  color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: 'deposit',  color: '#059669', bg: '#ECFDF5' },
 };
 
 
@@ -173,7 +174,7 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
       <View style={s.overlay}>
         <View style={s.modal}>
           <TouchableOpacity style={s.modalClose} onPress={onClose}>
-            <Text style={{ fontSize: 15, color: Colors.textMuted }}>✕</Text>
+            <Icon name="close" size={16} color={Colors.textMuted} />
           </TouchableOpacity>
 
           <Text style={s.modalTitle}>Thanh toán hóa đơn</Text>
@@ -181,9 +182,9 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
           <View style={[s.modalTypeBadge, { backgroundColor: tc.bg }]}>
             {/* Hoá đơn không thuộc kỳ nào (thu lúc nhận phòng) thì billMonthLabel trả
                 null — bỏ luôn phần kỳ, đừng ghép ra "Tnull/undefined". */}
-            <Text style={[s.modalTypeText, { color: tc.color }]}>
-              {tc.icon} {tc.label}{billMonthLabel(invoice) ? ` · ${billMonthLabel(invoice)}` : ''}
-            </Text>
+            <IconText icon={tc.icon} gap={5} style={[s.modalTypeText, { color: tc.color }]}>
+              {tc.label}{billMonthLabel(invoice) ? ` · ${billMonthLabel(invoice)}` : ''}
+            </IconText>
           </View>
 
           {creatingPayment ? (
@@ -211,11 +212,13 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
                         onPress={copyQrImage}
                         disabled={copyState !== 'ready'}
                       >
-                        <Text style={s.copyBubbleText}>
-                          {copyState === 'ready' ? '📋  Sao chép'
-                            : copyState === 'copying' ? 'Đang chép…'
-                            : '✓  Đã sao chép'}
-                        </Text>
+                        {copyState === 'copying'
+                          ? <Text style={s.copyBubbleText}>Đang chép…</Text>
+                          : (
+                            <IconText icon={copyState === 'ready' ? 'copy' : 'check'} style={s.copyBubbleText}>
+                              {copyState === 'ready' ? 'Sao chép' : 'Đã sao chép'}
+                            </IconText>
+                          )}
                       </TouchableOpacity>
                     )}
                   </TouchableOpacity>
@@ -226,9 +229,9 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
                     onPress={handleDownloadQr}
                     disabled={downloading}
                   >
-                    <Text style={s.downloadBtnText}>
-                      {downloading ? 'Đang tạo ảnh...' : '⬇️ Tải mã QR'}
-                    </Text>
+                    {downloading
+                      ? <Text style={s.downloadBtnText}>Đang tạo ảnh...</Text>
+                      : <IconText icon="download" style={s.downloadBtnText}>Tải mã QR</IconText>}
                   </TouchableOpacity>
                 </View>
               )}
