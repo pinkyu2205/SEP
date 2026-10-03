@@ -19,6 +19,7 @@ import type {
 } from '@/types';
 import { MAINTENANCE_STATUS_META } from '@/constants/maintenance';
 import { mapBeStatus } from '@/services/shared/maintenanceMappers';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import {
   formatCurrency, formatDate,
   getEquipmentLifecycleLabel, getEquipmentLifecycleColor, getHouseAreaLabel,
@@ -50,8 +51,8 @@ const STATUS_ORDER: EquipmentLifecycleStatus[] = [
   'NEW', 'GOOD', 'MAINTENANCE', 'DAMAGED', 'BROKEN', 'DISPOSED',
 ];
 
-const STATUS_ICON: Record<EquipmentLifecycleStatus, string> = {
-  NEW: '🆕', GOOD: '✅', MAINTENANCE: '🔧', DAMAGED: '⚠️', BROKEN: '❌', DISPOSED: '♻️',
+const STATUS_ICON: Record<EquipmentLifecycleStatus, IconName> = {
+  NEW: 'star', GOOD: 'success', MAINTENANCE: 'wrench', DAMAGED: 'warning', BROKEN: 'error', DISPOSED: 'recycle',
 };
 
 /**
@@ -205,15 +206,15 @@ const EquipmentDetailModal: React.FC<{
             {/* Header */}
             <View style={detailStyles.header}>
               <Text style={detailStyles.title}>{eqName(item)}</Text>
-              <TouchableOpacity onPress={onClose}>
-                <Text style={detailStyles.closeBtn}>✕</Text>
+              <TouchableOpacity onPress={onClose} style={detailStyles.closeBtn}>
+                <Icon name="close" size={20} color={Colors.textMuted} />
               </TouchableOpacity>
             </View>
 
             {/* Trạng thái + mã */}
             <View style={detailStyles.idRow}>
               <View style={[detailStyles.statusBadge, { backgroundColor: cfg.bg }]}>
-                <Text style={detailStyles.statusIcon}>{STATUS_ICON[shownStatus] ?? '•'}</Text>
+                <Icon name={STATUS_ICON[shownStatus] ?? 'info'} size={14} color={cfg.text} />
                 <Text style={[detailStyles.statusText, { color: cfg.text }]}>
                   {getEquipmentLifecycleLabel(shownStatus)}
                 </Text>
@@ -322,10 +323,10 @@ const EquipmentDetailModal: React.FC<{
                         >
                           <Text style={detailStyles.historyTicket}>#{r.requestCode}</Text>
                           <Text style={detailStyles.historyDesc} numberOfLines={1}>{what}</Text>
-                          <Text style={[detailStyles.historyStatus, { color: st.color }]}>
-                            {st.icon} {formatDate(r.resolvedAt ?? r.createdAt).slice(0, 5)}
-                          </Text>
-                          <Text style={detailStyles.historyCaret}>{open ? '▴' : '▾'}</Text>
+                          <IconText icon={st.icon} gap={3} iconSize={12} style={[detailStyles.historyStatus, { color: st.color }]}>
+                            {formatDate(r.resolvedAt ?? r.createdAt).slice(0, 5)}
+                          </IconText>
+                          <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} />
                         </TouchableOpacity>
 
                         {open && (
@@ -333,7 +334,7 @@ const EquipmentDetailModal: React.FC<{
                             <Text style={[detailStyles.historyLine, { color: st.color, fontWeight: '700' }]}>
                               {st.label}
                             </Text>
-                            {!!how && <Text style={detailStyles.historyLine}>🔧 {how}</Text>}
+                            {!!how && <IconText icon="wrench" gap={4} multiline style={detailStyles.historyLine}>{how}</IconText>}
                             <Text style={detailStyles.historyDate}>
                               Báo {formatDate(r.createdAt)}
                               {r.resolvedAt ? ` · Xong ${formatDate(r.resolvedAt)}` : ''}
@@ -341,12 +342,12 @@ const EquipmentDetailModal: React.FC<{
                             </Text>
                             {(tenantFault || cost > 0) && (
                               <View style={detailStyles.historyFoot}>
-                                {tenantFault && <Text style={detailStyles.historyFault}>⚠️ Lỗi do khách</Text>}
+                                {tenantFault && <IconText icon="warning" gap={3} style={detailStyles.historyFault}>Lỗi do khách</IconText>}
                                 {cost > 0 && <Text style={detailStyles.historyCost}>{formatCurrency(cost)}</Text>}
                               </View>
                             )}
                             <TouchableOpacity onPress={() => onOpenTicket(r.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                              <Text style={detailStyles.historyOpen}>Xem phiếu ›</Text>
+                              <IconText icon="chevron-right" trailing gap={2} style={detailStyles.historyOpen}>Xem phiếu</IconText>
                             </TouchableOpacity>
                           </View>
                         )}
@@ -372,7 +373,7 @@ const EquipmentDetailModal: React.FC<{
                 </Text>
                 {openTicket && (
                   <TouchableOpacity onPress={() => onOpenTicket(openTicket.id)} style={{ marginTop: 6 }}>
-                    <Text style={detailStyles.historyOpen}>Xem phiếu đang mở #{openTicket.requestCode} ›</Text>
+                    <IconText icon="chevron-right" trailing gap={2} style={detailStyles.historyOpen}>Xem phiếu đang mở #{openTicket.requestCode}</IconText>
                   </TouchableOpacity>
                 )}
               </View>
@@ -382,11 +383,11 @@ const EquipmentDetailModal: React.FC<{
                   <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: Spacing.md }} />
                 ) : item.status === 'BROKEN' ? (
                   <TouchableOpacity style={[detailStyles.manualBtn, detailStyles.manualBtnOk]} onPress={() => pickStatus('GOOD')}>
-                    <Text style={[detailStyles.manualBtnText, { color: Colors.success }]}>✅ Đã thay / sửa xong — dùng lại được</Text>
+                    <IconText icon="success" style={[detailStyles.manualBtnText, { color: Colors.success }]}>Đã thay / sửa xong — dùng lại được</IconText>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity style={detailStyles.manualBtn} onPress={() => pickStatus('BROKEN')}>
-                    <Text style={[detailStyles.manualBtnText, { color: Colors.error }]}>❌ Báo hỏng — cần thay</Text>
+                    <IconText icon="error" style={[detailStyles.manualBtnText, { color: Colors.error }]}>Báo hỏng — cần thay</IconText>
                     <Text style={detailStyles.manualBtnHint}>Dùng khi kiểm tra thấy hỏng hẳn mà không có phiếu bảo trì</Text>
                   </TouchableOpacity>
                 )
@@ -427,10 +428,10 @@ const detailStyles = StyleSheet.create({
   },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
   title: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, flex: 1, marginRight: Spacing.md },
-  closeBtn: { fontSize: 20, color: Colors.textMuted, padding: 4 },
+  closeBtn: { padding: 4 },
   idRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full },
-  statusIcon: { fontSize: 14 },
+
   statusText: { fontSize: 13, fontWeight: '700' },
   assetId: { fontSize: 13, fontWeight: '600', color: Colors.textMuted },
   disabledBox: {
@@ -483,7 +484,7 @@ const detailStyles = StyleSheet.create({
   historyTicket: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
   historyDesc: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   historyStatus: { fontSize: 12, fontWeight: '700' },
-  historyCaret: { fontSize: 12, color: Colors.textMuted },
+
   historyBody: { paddingBottom: Spacing.md, gap: 3 },
   historyLine: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   historyDate: { fontSize: 11, color: Colors.textMuted },
@@ -571,7 +572,7 @@ export const EquipmentScreen: React.FC = () => {
       <SafeAreaView style={styles.safe}>
         <ScreenHeader title="Thiết bị" onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined} />
         <View style={[styles.center, { flex: 1 }]}>
-          <Text style={{ fontSize: 40 }}>🏠</Text>
+          <Icon name="home" size={40} color={Colors.textMuted} strokeWidth={1.5} />
           <Text style={styles.centerTitle}>
             {houses.length === 0 ? 'Chưa được giao nhà nào' : 'Nhà này không thuộc phạm vi của bạn'}
           </Text>
@@ -626,20 +627,23 @@ const HouseList: React.FC<{
       <ScrollView contentContainerStyle={styles.houseListContent} showsVerticalScrollIndicator={false}>
         {/* Ít nhà thì ô tìm chỉ là thứ chắn đường. */}
         {houses.length > 5 && (
-          <TextInput
-            style={[styles.searchInput, { marginBottom: Spacing.md }]}
-            placeholder="🔍  Tìm nhà..."
-            placeholderTextColor={Colors.textMuted}
-            value={query}
-            onChangeText={setQuery}
-          />
+          <View style={[styles.searchBox, { marginBottom: Spacing.md }]}>
+            <Icon name="search" size={16} color={Colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Tìm nhà..."
+              placeholderTextColor={Colors.textMuted}
+              value={query}
+              onChangeText={setQuery}
+            />
+          </View>
         )}
         {visible.map((h) => (
           <EquipmentSummaryCard
             key={h.id}
             propertyId={h.id}
             title={h.propertyName}
-            icon={h.wholeHouse ? '🏡' : '🏠'}
+            icon={h.wholeHouse ? 'home' : 'building'}
             prefix={h.wholeHouse ? 'Nguyên căn' : 'Chia phòng'}
             onOpen={() => onOpen(h)}
           />
@@ -783,10 +787,10 @@ const HouseEquipment: React.FC<{
     }
   };
 
-  const groupTitle = (g: string) => {
-    if (g === 'Toàn bộ nhà') return '🏡 Toàn bộ nhà';
-    if (g === COMMON_AREA) return `🧰 ${g}`;
-    return `🚪 ${/^\d/.test(g) ? `Phòng ${g}` : g}`;
+  const groupTitle = (g: string): { icon: IconName; label: string } => {
+    if (g === 'Toàn bộ nhà') return { icon: 'home', label: 'Toàn bộ nhà' };
+    if (g === COMMON_AREA) return { icon: 'toolbox', label: g };
+    return { icon: 'door', label: /^\d/.test(g) ? `Phòng ${g}` : g };
   };
 
   return (
@@ -798,15 +802,15 @@ const HouseEquipment: React.FC<{
       <ScreenHeader
         title="Thiết bị"
         houseName={house.propertyName}
-        houseIcon={isWholeHouse ? '🏡' : '🏠'}
+        houseIcon={isWholeHouse ? 'home' : 'building'}
         onBack={onBack}
         subtitle={listLoading ? undefined : (
           <>
             {isWholeHouse ? 'Nguyên căn' : 'Chia phòng'}
             {health.total === 0 ? ' · chưa có thiết bị' : ` · ${health.total} thiết bị`}
             {health.total > 0 && (health.need > 0
-              ? <Text style={styles.subtitleWarn}> · ⚠️ {health.need} cần xử lý</Text>
-              : <Text style={styles.subtitleOk}> · ✅ tất cả đang tốt</Text>)}
+              ? <Text style={styles.subtitleWarn}> · {health.need} cần xử lý</Text>
+              : <Text style={styles.subtitleOk}> · tất cả đang tốt</Text>)}
             {health.gone > 0 && <Text style={styles.subtitleMuted}> · {health.gone} đã thanh lý</Text>}
           </>
         )}
@@ -828,13 +832,16 @@ const HouseEquipment: React.FC<{
               mất gần nửa màn hình, chỉ còn chỗ cho hai ba thiết bị. */}
           {equipments.length > 0 && (
             <>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="🔍  Tên thiết bị, mã QR, số phòng..."
-                placeholderTextColor={Colors.textMuted}
-                value={search}
-                onChangeText={setSearch}
-              />
+              <View style={styles.searchBox}>
+                <Icon name="search" size={16} color={Colors.textMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Tên thiết bị, mã QR, số phòng..."
+                  placeholderTextColor={Colors.textMuted}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+              </View>
 
               {/* Chỉ còn 1 chip ("Tất cả") thì bộ lọc không lọc được gì — ẩn. */}
               {visibleFilters.length > 2 && (
@@ -893,7 +900,7 @@ const HouseEquipment: React.FC<{
 
           {grouped.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={{ fontSize: 40 }}>📦</Text>
+              <Icon name="package" size={40} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={styles.emptyText}>
                 {equipments.length === 0 ? 'Nhà này chưa có thiết bị nào' : 'Không có thiết bị khớp bộ lọc'}
               </Text>
@@ -904,7 +911,9 @@ const HouseEquipment: React.FC<{
             grouped.map(([room, items]) => (
               <View key={room} style={styles.roomSection}>
                 <View style={styles.roomHead}>
-                  <Text style={styles.roomTitle}>{groupTitle(room)}</Text>
+                  <IconText icon={groupTitle(room).icon} iconColor={Colors.textSecondary} style={styles.roomTitle}>
+                    {groupTitle(room).label}
+                  </IconText>
                   <Text style={styles.roomCount}>{items.length} thiết bị</Text>
                 </View>
                 <View style={styles.roomCard}>
@@ -923,10 +932,13 @@ const HouseEquipment: React.FC<{
                         activeOpacity={0.7}
                       >
                         <View style={styles.eqRowLeft}>
-                          <Text style={styles.eqName} numberOfLines={1}>
-                            {st !== 'GOOD' && st !== 'NEW' ? `${STATUS_ICON[st]} ` : ''}
-                            {eqName(eq)}
-                          </Text>
+                          {st !== 'GOOD' && st !== 'NEW' ? (
+                            <IconText icon={STATUS_ICON[st]} iconColor={cfg.text} gap={4} style={styles.eqName} numberOfLines={1}>
+                              {eqName(eq)}
+                            </IconText>
+                          ) : (
+                            <Text style={styles.eqName} numberOfLines={1}>{eqName(eq)}</Text>
+                          )}
                           {/*
                             Ưu tiên MÃ QR — đó là mã dán trên máy, manager đối chiếu được bằng
                             mắt. Danh mục chỉ hiện khi ĐÃ phân loại: chưa nhập thì dòng nào
@@ -942,9 +954,9 @@ const HouseEquipment: React.FC<{
                           </Text>
                           {/* Đang sửa: nói luôn phiếu nào, tới bước nào — khỏi mở chi tiết */}
                           {open && (
-                            <Text style={styles.eqOpenTicket} numberOfLines={1}>
-                              🔧 #{open.requestCode} · {MAINTENANCE_STATUS_META[mapBeStatus(open.status) as keyof typeof MAINTENANCE_STATUS_META]?.label ?? 'Đang xử lý'}
-                            </Text>
+                            <IconText icon="wrench" gap={4} style={styles.eqOpenTicket} numberOfLines={1}>
+                              #{open.requestCode} · {MAINTENANCE_STATUS_META[mapBeStatus(open.status) as keyof typeof MAINTENANCE_STATUS_META]?.label ?? 'Đang xử lý'}
+                            </IconText>
                           )}
                         </View>
                         <View style={styles.eqRowRight}>
@@ -954,7 +966,7 @@ const HouseEquipment: React.FC<{
                             </Text>
                           </View>
                           {/* Bảo hành CHỈ hiện khi sắp hết hoặc đã hết — xem `warrantyFlag`. */}
-                          {w && <Text style={[styles.eqWarranty, { color: w.color }]}>🛡 {w.label}</Text>}
+                          {w && <IconText icon="shield" gap={3} iconSize={11} style={[styles.eqWarranty, { color: w.color }]}>{w.label}</IconText>}
                         </View>
                       </TouchableOpacity>
                     );
@@ -990,20 +1002,22 @@ const HouseEquipment: React.FC<{
 const ScreenHeader: React.FC<{
   title: string;
   houseName?: string;
-  houseIcon?: string;
+  houseIcon?: IconName;
   subtitle?: React.ReactNode;
   onBack?: () => void;
 }> = ({ title, houseName, houseIcon, subtitle, onBack }) => (
   <View style={styles.header}>
     {onBack && (
       <TouchableOpacity style={styles.backBtn} onPress={onBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={styles.backBtnText}>‹</Text>
+        <Icon name="back" size={26} color={Colors.textPrimary} />
       </TouchableOpacity>
     )}
     <View style={{ flex: 1 }}>
       <Text style={styles.title}>{title}</Text>
       {!!houseName && (
-        <Text style={styles.houseName} numberOfLines={2}>{houseIcon} {houseName}</Text>
+        houseIcon
+          ? <IconText icon={houseIcon} gap={5} style={styles.houseName} numberOfLines={2}>{houseName}</IconText>
+          : <Text style={styles.houseName} numberOfLines={2}>{houseName}</Text>
       )}
       {subtitle != null && <Text style={styles.subtitle}>{subtitle}</Text>}
     </View>
@@ -1022,7 +1036,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.md,
   },
   backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
+
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   houseName: { fontSize: 14, fontWeight: '700', color: Colors.primary, marginTop: 2 },
   subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
@@ -1034,10 +1048,12 @@ const styles = StyleSheet.create({
   houseListContent: { paddingHorizontal: Spacing.lg, paddingBottom: 80 },
 
   // ── Tìm + lọc ───────────────────────────────────────────────────────────
-  searchInput: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
-    fontSize: 14, color: Colors.textPrimary, ...Shadow.sm,
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, ...Shadow.sm,
   },
+  searchInput: { flex: 1, paddingVertical: Spacing.md, fontSize: 14, color: Colors.textPrimary },
   /** Chip rộng theo nội dung + tự xuống dòng — không chip nào khuất ngoài mép. */
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginTop: Spacing.sm },
   /** Lọc ra 0 kết quả → làm nhạt cho khỏi mất công bấm thử. */

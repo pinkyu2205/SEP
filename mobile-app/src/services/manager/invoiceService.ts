@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import type { IconName } from '@/components/common/Icon';
 
 /**
  * Manager tạo & gửi hoá đơn cho tenant (nối backend Spring THẬT).
@@ -332,17 +333,17 @@ export const isOnboardEnvelope = (inv: Pick<ManagerInvoice, 'code'>): boolean =>
 /** Nhãn + icon theo loại, đã tách riêng hoá đơn đón khách. */
 export const invoiceKind = (
   inv: Pick<ManagerInvoice, 'code' | 'type'>,
-): { icon: string; label: string } => {
-  if (isOnboardEnvelope(inv)) return { icon: '🔑', label: 'Cọc + tiền nhà kỳ đầu' };
+): { icon: IconName; label: string } => {
+  if (isOnboardEnvelope(inv)) return { icon: 'key', label: 'Cọc + tiền nhà kỳ đầu' };
   // HD-MAINT-{contractId}-{ts}: BE gom các khoản đền bù sửa chữa (khách làm hư) thành một
   // hoá đơn loại MAINTENANCE — manager nhận về dạng OTHER nên phải nhận theo mã.
-  if ((inv.code || '').toUpperCase().startsWith('HD-MAINT')) return { icon: '🔧', label: 'Phí sửa chữa (khách làm hư)' };
+  if ((inv.code || '').toUpperCase().startsWith('HD-MAINT')) return { icon: 'wrench', label: 'Phí sửa chữa (khách làm hư)' };
   switch (inv.type) {
-    case 'RENT':        return { icon: '🏠', label: 'Tiền nhà' };
-    case 'ELECTRICITY': return { icon: '⚡', label: 'Tiền điện' };
-    case 'WATER':       return { icon: '💧', label: 'Tiền nước' };
-    case 'SERVICE':     return { icon: '🧾', label: 'Phí dịch vụ' };
-    default:            return { icon: '📄', label: 'Khoản khác' };
+    case 'RENT':        return { icon: 'home', label: 'Tiền nhà' };
+    case 'ELECTRICITY': return { icon: 'electric', label: 'Tiền điện' };
+    case 'WATER':       return { icon: 'water', label: 'Tiền nước' };
+    case 'SERVICE':     return { icon: 'receipt', label: 'Phí dịch vụ' };
+    default:            return { icon: 'document', label: 'Khoản khác' };
   }
 };
 

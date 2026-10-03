@@ -10,6 +10,7 @@ import { formatDate, showAlert, readApiError } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenant/selfService';
 import { todayIso } from '@/utils/serverTime';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * QUYẾT TOÁN TRẢ PHÒNG — bước cuối của luồng checkout.
@@ -218,7 +219,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Quyết toán trả phòng</Text>
         <View style={{ width: 40 }} />
@@ -308,14 +309,14 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           <>
             <TouchableOpacity style={[s.primaryBtn, busy && s.btnDisabled]} onPress={submitSettlement} disabled={busy}>
               <Text style={s.primaryBtnText}>
-                {busy ? 'Đang gửi...' : status === 'DISPUTED' ? 'Gửi lại cho khách xác nhận' : 'Gửi khách xác nhận →'}
+                {busy ? 'Đang gửi...' : status === 'DISPUTED' ? 'Gửi lại cho khách xác nhận' : 'Gửi khách xác nhận'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={s.ghostBtn}
               onPress={() => navigation.navigate('CheckoutInspection', { checkoutId })}
             >
-              <Text style={s.ghostBtnText}>← Quay lại sửa biên bản</Text>
+              <IconText icon="arrow-left" style={s.ghostBtnText}>Quay lại sửa biên bản</IconText>
             </TouchableOpacity>
           </>
         )}
@@ -324,7 +325,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             Vẫn liệt kê việc kế tiếp để manager biết khi nào mới đến lượt mình. */}
         {status === 'WAITING_TENANT' && (
           <View style={s.infoCard}>
-            <Text style={s.infoTitle}>⏳ Đã gửi — đang chờ khách xác nhận</Text>
+            <IconText icon="hourglass" style={s.infoTitle}>Đã gửi — đang chờ khách xác nhận</IconText>
             <Text style={s.infoText}>
               Bây giờ chưa cần làm gì thêm.
               {req?.tenantResponseDeadline ? ` Hạn khách phản hồi: ${formatDate(req.tenantResponseDeadline)}.` : ''}
@@ -348,7 +349,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             </Text>
 
             <TouchableOpacity style={s.refreshBtn} onPress={load} disabled={busy}>
-              <Text style={s.refreshBtnText}>🔄 Kiểm tra khách đã phản hồi chưa</Text>
+              <IconText icon="refresh" style={s.refreshBtnText}>Kiểm tra khách đã phản hồi chưa</IconText>
             </TouchableOpacity>
           </View>
         )}
@@ -381,7 +382,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
               </View>
             ) : !refunded && (
               <View style={s.infoCard}>
-                <Text style={s.infoTitle}>⏳ Khách đã trả đủ — đang chờ hoàn cọc</Text>
+                <IconText icon="hourglass" style={s.infoTitle}>Khách đã trả đủ — đang chờ hoàn cọc</IconText>
                 <Text style={s.infoText}>
                   Chủ nhà chuyển cọc về tài khoản khách đã đăng ký, trong 1–3 ngày làm việc.
                   Bạn không phải chuyển tiền và không cần tải biên lai.
@@ -395,9 +396,9 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
 
             {refunded && (
               <View style={s.doneCard}>
-                <Text style={s.doneText}>
-                  ✓ Đã hoàn cọc cho khách ngày {formatDate(settlement?.refundedAt ?? todayIso())}
-                </Text>
+                <IconText icon="success" style={s.doneText}>
+                  Đã hoàn cọc cho khách ngày {formatDate(settlement?.refundedAt ?? todayIso())}
+                </IconText>
                 <Text style={s.doneSub}>Bấm "Hoàn tất trả phòng" bên dưới để thanh lý hợp đồng.</Text>
               </View>
             )}
@@ -421,7 +422,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
               onPress={confirmComplete}
               disabled={busy || (!moneyDone && !settlementMissing)}
             >
-              <Text style={s.primaryBtnText}>🏁 Hoàn tất trả phòng (thanh lý HĐ)</Text>
+              <Text style={s.primaryBtnText}>Hoàn tất trả phòng (thanh lý HĐ)</Text>
             </TouchableOpacity>
             {!settlementMissing && !moneyDone && (
               <Text style={s.blockNote}>
@@ -463,7 +464,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   body: { padding: Spacing.lg },

@@ -8,6 +8,7 @@ import { realPropertyService, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 import { EquipmentSummaryCard } from '@/components/manager/EquipmentSummaryCard';
+import { Dot, Icon, IconText, type IconName } from '@/components/common/Icon';
 
 // `fmt` đã bỏ 13/08/2026 — màn này không còn in số tiền nào (tiền nhà ẩn với manager).
 
@@ -30,20 +31,20 @@ const floorOf = (roomNumber: string): number => {
   return !isNaN(n) && n >= 100 ? Math.floor(n / 100) : 1;
 };
 
-const QUICK_ACTIONS = [
+const QUICK_ACTIONS: { icon: IconName; label: string; desc: string; route: string; color: string }[] = [
   // 'BuildingInvoice' (13/08/2026): màn đó chạy hoàn toàn bằng dữ liệu MOCK
   // (getBuildingOps/getPropertyById) nên mở ra là trắng trơn + "Tổng phải thu 0đ".
   // Màn thật là BuildingBilling — nối API và đã dùng ở nơi khác.
-  { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingBilling', color: '#F59E0B' },
-  { emoji: '⚡', label: 'Ghi điện nước', desc: 'Chụp công tơ', route: 'UtilityBilling', color: Colors.accent },
-  { emoji: '🔧', label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
-  { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'RoomManage', color: Colors.success },
-  { emoji: '📋', label: 'Hợp đồng', desc: 'HĐ thuê', route: 'BuildingContract', color: Colors.info },
-  { emoji: '👥', label: 'Khách thuê', desc: 'Cư dân', route: 'TenantList', color: Colors.primary },
+  { icon: 'receipt',  label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingBilling', color: '#F59E0B' },
+  { icon: 'meter',    label: 'Ghi điện nước', desc: 'Chụp công tơ', route: 'UtilityBilling', color: Colors.accent },
+  { icon: 'wrench',   label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
+  { icon: 'door',     label: 'Phòng', desc: 'Quản lý', route: 'RoomManage', color: Colors.success },
+  { icon: 'contract', label: 'Hợp đồng', desc: 'HĐ thuê', route: 'BuildingContract', color: Colors.info },
+  { icon: 'users',    label: 'Khách thuê', desc: 'Cư dân', route: 'TenantList', color: Colors.primary },
 ];
 
 interface IssueItem {
-  key: string; icon: string; title: string; meta: string; color: string; route: string;
+  key: string; icon: IconName; title: string; meta: string; color: string; route: string;
 }
 
 export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
@@ -118,7 +119,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
       // Nhà nguyên căn không có roomNumber → giữ lại, vì không tra được theo phòng.
       .filter(i => !i.roomNumber || tenantByRoom.has(i.roomNumber))
       .map(i => ({
-        key: `inv-${i.id}`, icon: '💸', color: '#EF4444',
+        key: `inv-${i.id}`, icon: 'receipt', color: '#EF4444',
         title: `Hoá đơn quá hạn · ${i.roomNumber ? `Phòng ${i.roomNumber}` : 'Nguyên căn'}`,
         // KHÔNG in số tiền: tiền nhà bị ẩn với manager nên `i.amount` về 0, `fmt(0)` ra
         // "0đ" — đọc thành "khách nợ 0 đồng", sai hẳn nghĩa. Chỉ nêu tên khách.
@@ -128,7 +129,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     const upcoming: IssueItem[] = rooms
       .filter(r => r.status === 'MAINTENANCE')
       .map(r => ({
-        key: `mt-${r.id}`, icon: '🔧', color: '#F59E0B',
+        key: `mt-${r.id}`, icon: 'wrench', color: '#F59E0B',
         title: `Phòng ${r.roomNumber} đang bảo trì`, meta: 'Cần xử lý',
         route: 'RoomManage',
       }));
@@ -136,11 +137,11 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   }, [invoices, rooms, tenantByRoom]);
 
   const totalIssues = urgent.length + upcoming.length;
-  const health = urgent.length > 0
-    ? { label: '🔴 Cần xử lý ngay', color: '#EF4444' }
+  const health: { label: string; color: string; icon: IconName } = urgent.length > 0
+    ? { label: 'Cần xử lý ngay', color: '#EF4444', icon: 'alert' }
     : upcoming.length > 0
-      ? { label: '🟡 Có việc sắp tới', color: '#F59E0B' }
-      : { label: '✅ Hoạt động ổn định', color: '#16A34A' };
+      ? { label: 'Có việc sắp tới', color: '#F59E0B', icon: 'clock' }
+      : { label: 'Hoạt động ổn định', color: '#16A34A', icon: 'success' };
 
   const floors = useMemo(
     () => [...new Set(rooms.map(r => floorOf(r.roomNumber)))].sort((a, b) => a - b),
@@ -149,12 +150,12 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
 
   const renderIssue = (it: IssueItem) => (
     <TouchableOpacity key={it.key} style={[styles.issueRow, { borderLeftColor: it.color }]} onPress={() => nav(it.route)}>
-      <Text style={styles.issueIcon}>{it.icon}</Text>
+      <Icon name={it.icon} size={18} color={it.color} />
       <View style={{ flex: 1 }}>
         <Text style={styles.issueTitle}>{it.title}</Text>
         <Text style={styles.issueMeta}>{it.meta}</Text>
       </View>
-      <Text style={styles.issueChevron}>›</Text>
+      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
   );
 
@@ -162,12 +163,14 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
+            <Icon name="back" size={26} color={Colors.primary} />
+          </TouchableOpacity>
           <Text style={styles.title}>Toà nhà</Text>
           <View style={{ width: 60 }} />
         </View>
         <View style={styles.emptyState}>
-          <Text style={{ fontSize: 40 }}>🏢</Text>
+          <Icon name="building" size={40} color={Colors.textMuted} strokeWidth={1.5} />
           <Text style={styles.emptyText}>Không tìm thấy toà nhà</Text>
         </View>
       </SafeAreaView>
@@ -177,8 +180,8 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{prop?.name ?? 'Toà nhà'}</Text>
         <View style={{ width: 60 }} />
@@ -195,8 +198,10 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
               <Text style={styles.heroSub}>{occupied}/{totalRooms} phòng đang thuê</Text>
             </View>
             <View style={styles.heroAddrBox}>
-              {!!prop?.address && <Text style={styles.heroAddr} numberOfLines={3}>📍 {prop.address}</Text>}
-              <Text style={styles.heroFloors}>🏢 {floors.length} tầng · {totalRooms} phòng</Text>
+              {!!prop?.address && (
+                <IconText icon="location" gap={4} multiline style={styles.heroAddr} numberOfLines={3}>{prop.address}</IconText>
+              )}
+              <IconText icon="layers" gap={4} style={styles.heroFloors}>{floors.length} tầng · {totalRooms} phòng</IconText>
             </View>
           </View>
           <View style={styles.heroBarBg}>
@@ -221,7 +226,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
             </View>
           </View>
           <View style={styles.healthChip}>
-            <Text style={styles.healthChipText}>{health.label}</Text>
+            <IconText icon={health.icon} style={styles.healthChipText}>{health.label}</IconText>
           </View>
         </View>
 
@@ -241,19 +246,25 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
 
         {totalIssues === 0 ? (
           <View style={styles.okCard}>
-            <Text style={styles.okText}>✅ Toà nhà đang hoạt động ổn định</Text>
+            <IconText icon="success" style={styles.okText}>Toà nhà đang hoạt động ổn định</IconText>
           </View>
         ) : (
           <>
             {urgent.length > 0 && (
               <>
-                <Text style={styles.groupLabel}>🔴 KHẨN CẤP</Text>
+                <View style={styles.groupLabelRow}>
+                  <Dot color="#EF4444" size={7} />
+                  <Text style={styles.groupLabel}>KHẨN CẤP</Text>
+                </View>
                 <View style={styles.issueGroup}>{urgent.map(renderIssue)}</View>
               </>
             )}
             {upcoming.length > 0 && (
               <>
-                <Text style={[styles.groupLabel, { marginTop: Spacing.md }]}>🟡 SẮP TỚI</Text>
+                <View style={[styles.groupLabelRow, { marginTop: Spacing.md }]}>
+                  <Dot color="#F59E0B" size={7} />
+                  <Text style={styles.groupLabel}>SẮP TỚI</Text>
+                </View>
                 <View style={styles.issueGroup}>{upcoming.map(renderIssue)}</View>
               </>
             )}
@@ -264,7 +275,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Tổng quan phòng</Text>
           <TouchableOpacity onPress={() => nav('RoomManage')}>
-            <Text style={styles.sectionLink}>Quản lý ›</Text>
+            <IconText icon="chevron-right" trailing gap={2} style={styles.sectionLink}>Quản lý</IconText>
           </TouchableOpacity>
         </View>
         <View style={styles.card}>
@@ -292,7 +303,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
                       <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[st] }]} />
                       <Text style={styles.roomCode}>{r.roomNumber}</Text>
                       <Text style={styles.roomStatus}>
-                        {ROOM_STATUS_LABEL[st]}{fixingRooms.has(r.id) ? ' · 🔧 sửa TB' : ''}
+                        {ROOM_STATUS_LABEL[st]}{fixingRooms.has(r.id) ? ' · đang sửa TB' : ''}
                       </Text>
                       {!!tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{tenantName}</Text>}
                     </TouchableOpacity>
@@ -308,7 +319,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
           {QUICK_ACTIONS.map((a, i) => (
             <TouchableOpacity key={i} style={styles.actionBtn} onPress={() => nav(a.route)}>
               <View style={[styles.actionIconWrap, { backgroundColor: a.color + '18' }]}>
-                <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                <Icon name={a.icon} size={19} color={a.color} />
               </View>
               <Text style={styles.actionLabel}>{a.label}</Text>
               <Text style={styles.actionDesc}>{a.desc}</Text>
@@ -325,7 +336,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Khách thuê</Text>
           <TouchableOpacity onPress={() => nav('TenantList')}>
-            <Text style={styles.sectionLink}>Tất cả ›</Text>
+            <IconText icon="chevron-right" trailing gap={2} style={styles.sectionLink}>Tất cả</IconText>
           </TouchableOpacity>
         </View>
         <View style={styles.card}>
@@ -359,7 +370,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
     backgroundColor: Colors.white, ...Shadow.sm,
   },
-  backText: { color: Colors.primary, fontWeight: '600', fontSize: 15, width: 60 },
+  backBtn: { width: 60 },
   title: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, flex: 1, textAlign: 'center' },
   scroll: { padding: Spacing.lg },
 
@@ -391,7 +402,8 @@ const styles = StyleSheet.create({
   sectionLink: { fontSize: 13, color: Colors.primary, fontWeight: '600' },
   countBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   countBadgeText: { fontSize: 12, fontWeight: '800' },
-  groupLabel: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5, marginBottom: Spacing.sm },
+  groupLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: Spacing.sm },
+  groupLabel: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
 
   // Issues
   okCard: { backgroundColor: '#F0FDF4', borderRadius: BorderRadius.lg, padding: Spacing.md, alignItems: 'center' },
@@ -402,10 +414,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     padding: Spacing.md, borderLeftWidth: 3, ...Shadow.sm,
   },
-  issueIcon: { fontSize: 18 },
+
   issueTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   issueMeta: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  issueChevron: { fontSize: 20, color: Colors.textMuted, fontWeight: '600' },
+
 
   // Generic card
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, ...Shadow.sm },
@@ -425,7 +437,7 @@ const styles = StyleSheet.create({
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   actionBtn: { width: '30.7%', alignItems: 'center', backgroundColor: Colors.white, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm },
   actionIconWrap: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  actionEmoji: { fontSize: 18 },
+
   actionLabel: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
   actionDesc: { fontSize: 10, color: Colors.textMuted, marginTop: 1 },
 

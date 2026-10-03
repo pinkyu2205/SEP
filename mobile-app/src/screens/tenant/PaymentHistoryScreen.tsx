@@ -15,6 +15,7 @@ import {
 import { SharedBill } from '@/types/bill';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import { currentMonthIso } from '@/utils/serverTime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * Lịch sử thanh toán của khách thuê.
@@ -221,27 +222,29 @@ const toTxn = (p: TenantPayment): Txn => ({
   monthKey: (p.paidAt || '').slice(0, 7),
 });
 
-const METHOD_CONFIG: Record<string, { label: string; emoji: string }> = {
-  qr: { label: 'QR Code', emoji: '📱' },
-  bank_transfer: { label: 'Chuyển khoản', emoji: '🏦' },
-  cash: { label: 'Tiền mặt', emoji: '💵' },
-  other: { label: 'Khác', emoji: '💳' },
+const METHOD_CONFIG: Record<string, { label: string }> = {
+  qr: { label: 'QR Code' },
+  bank_transfer: { label: 'Chuyển khoản' },
+  cash: { label: 'Tiền mặt' },
+  other: { label: 'Khác' },
 };
 
+type TypeCfg = { label: string; icon: IconName; color: string; bg: string };
+
 /** Đồng bộ với TYPE_CONFIG ở màn Hoá đơn để hai màn nhìn ra cùng một loại phí. */
-const TYPE_CONFIG: Record<PayKind, { label: string; icon: string; color: string; bg: string }> = {
-  RENT: { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  ELECTRICITY: { label: 'Tiền điện', icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  WATER: { label: 'Tiền nước', icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  SERVICE: { label: 'Dịch vụ', icon: '🧾', color: '#0D9488', bg: '#CCFBF1' },
-  MAINTENANCE: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  DEPOSIT: { label: 'Tiền cọc', icon: '🔐', color: '#0891B2', bg: '#CFFAFE' },
-  OTHER: { label: 'Khác', icon: '💠', color: '#64748B', bg: '#F1F5F9' },
+const TYPE_CONFIG: Record<PayKind, TypeCfg> = {
+  RENT: { label: 'Tiền phòng', icon: 'home', color: '#7C3AED', bg: '#F5F3FF' },
+  ELECTRICITY: { label: 'Tiền điện', icon: 'electric', color: '#D97706', bg: '#FEF9C3' },
+  WATER: { label: 'Tiền nước', icon: 'water', color: '#2563EB', bg: '#DBEAFE' },
+  SERVICE: { label: 'Dịch vụ', icon: 'receipt', color: '#0D9488', bg: '#CCFBF1' },
+  MAINTENANCE: { label: 'Phí bảo trì', icon: 'wrench', color: '#DC2626', bg: '#FEE2E2' },
+  DEPOSIT: { label: 'Tiền cọc', icon: 'deposit', color: '#0891B2', bg: '#CFFAFE' },
+  OTHER: { label: 'Khác', icon: 'document', color: '#64748B', bg: '#F1F5F9' },
 };
 
 /** Khoản thu lúc nhận phòng — BE để `type = OTHER`, nhận diện theo mã (isOnboardCode). */
-const ONBOARD_TYPE_CFG = {
-  label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5',
+const ONBOARD_TYPE_CFG: TypeCfg = {
+  label: 'Thu khi nhận phòng', icon: 'key', color: '#059669', bg: '#ECFDF5',
 };
 const typeCfg = (t: PayKind) => TYPE_CONFIG[t] ?? TYPE_CONFIG.OTHER;
 
@@ -249,11 +252,11 @@ type TypeFilter = 'all' | PayKind;
 
 const TYPE_TABS: { key: TypeFilter; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
-  { key: 'RENT', label: '🏠 Phòng' },
-  { key: 'DEPOSIT', label: '🔐 Cọc' },
-  { key: 'ELECTRICITY', label: '⚡ Điện' },
-  { key: 'WATER', label: '💧 Nước' },
-  { key: 'MAINTENANCE', label: '🔧 Bảo trì' },
+  { key: 'RENT', label: 'Phòng' },
+  { key: 'DEPOSIT', label: 'Cọc' },
+  { key: 'ELECTRICITY', label: 'Điện' },
+  { key: 'WATER', label: 'Nước' },
+  { key: 'MAINTENANCE', label: 'Bảo trì' },
 ];
 
 /** Cọc: PAYOS = chuyển khoản qua cổng, CASH = quản lý thu tay. */
@@ -530,12 +533,12 @@ export const PaymentHistoryScreen: React.FC = () => {
         {index > 0 && <View style={styles.rowDivider} />}
         <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => openTxn(item)}>
           <View style={[styles.typeIcon, { backgroundColor: cfg.bg }]}>
-            <Text style={{ fontSize: 17 }}>{cfg.icon}</Text>
+            <Icon name={cfg.icon} size={18} color={cfg.color} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
             <Text style={styles.rowSub} numberOfLines={1}>
-              {method.emoji} {method.label} · {formatDateTime(item.createdAt)}
+              {method.label} · {formatDateTime(item.createdAt)}
             </Text>
             {!!item.splitNote && <Text style={styles.rowNote} numberOfLines={2}>{item.splitNote}</Text>}
             {item.duplicate && (
@@ -566,7 +569,7 @@ export const PaymentHistoryScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
-          <Text style={styles.backArrow}>‹</Text>
+          <Icon name="back" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Đã thanh toán</Text>
       </View>
@@ -598,21 +601,21 @@ export const PaymentHistoryScreen: React.FC = () => {
               </Text>
               {stats.depositCount > 0 && (
                 <View style={styles.depositPill}>
-                  <Text style={styles.depositPillText}>
-                    🔐 Gồm {formatCurrency(stats.depositTotal)} tiền cọc — hoàn lại khi trả phòng
-                  </Text>
+                  <IconText icon="deposit" gap={5} multiline style={styles.depositPillText}>
+                    Gồm {formatCurrency(stats.depositTotal)} tiền cọc — hoàn lại khi trả phòng
+                  </IconText>
                 </View>
               )}
               {stats.duplicateCount > 0 && (
-                <Text style={styles.summaryWarn}>
-                  ⚠️ {stats.duplicateCount} giao dịch ghi trùng ({formatCurrency(stats.duplicateAmount)}) — đã trừ khỏi tổng
-                </Text>
+                <IconText icon="warning" multiline style={styles.summaryWarn}>
+                  {stats.duplicateCount} giao dịch ghi trùng ({formatCurrency(stats.duplicateAmount)}) — đã trừ khỏi tổng
+                </IconText>
               )}
             </View>
 
             {/* ── Tìm kiếm ── */}
             <View style={styles.searchBox}>
-              <Text style={styles.searchIcon}>🔍</Text>
+              <Icon name="search" size={16} color={Colors.textMuted} style={styles.searchIcon} />
               <TextInput
                 value={query}
                 onChangeText={setQuery}
@@ -622,7 +625,7 @@ export const PaymentHistoryScreen: React.FC = () => {
               />
               {!!query && (
                 <TouchableOpacity onPress={() => setQuery('')} style={styles.searchClear}>
-                  <Text style={styles.searchClearText}>✕</Text>
+                  <Icon name="close" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
@@ -667,9 +670,9 @@ export const PaymentHistoryScreen: React.FC = () => {
               style={[styles.sectionHeader, open ? styles.sectionHeaderOpen : styles.sectionHeaderClosed]}
             >
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>
-                  {section.pinned ? '🔐 Tiền cọc' : section.title}
-                </Text>
+                {section.pinned
+                  ? <IconText icon="deposit" iconColor="#0E7490" style={styles.sectionTitle}>Tiền cọc</IconText>
+                  : <Text style={styles.sectionTitle}>{section.title}</Text>}
                 <Text style={styles.sectionMeta}>
                   {section.pinned ? 'Hoàn lại khi trả phòng' : `${section.count} giao dịch`}
                 </Text>
@@ -677,7 +680,7 @@ export const PaymentHistoryScreen: React.FC = () => {
               <Text style={[styles.sectionTotal, section.pinned && { color: '#0E7490' }]}>
                 {formatCurrency(section.total)}
               </Text>
-              <Text style={styles.chevron}>{open ? '⌃' : '⌄'}</Text>
+              <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textMuted} />
             </TouchableOpacity>
           );
         }}
@@ -690,7 +693,7 @@ export const PaymentHistoryScreen: React.FC = () => {
             <View style={styles.empty}><ActivityIndicator size="large" color={Colors.primary} /></View>
           ) : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>{hasFilter ? '🔍' : '💳'}</Text>
+              <Icon name={hasFilter ? 'search' : 'card'} size={40} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={styles.emptyTitle}>
                 {hasFilter ? 'Không có giao dịch khớp' : 'Chưa có giao dịch'}
               </Text>
@@ -715,7 +718,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { fontSize: 30, lineHeight: 34, color: Colors.textPrimary },
+
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
 
   list: { padding: Spacing.base, paddingBottom: 60 },
@@ -739,10 +742,10 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border,
     paddingHorizontal: Spacing.md, height: 44,
   },
-  searchIcon: { fontSize: 14, marginRight: Spacing.sm },
+  searchIcon: { marginRight: Spacing.sm },
   searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 0 },
   searchClear: { padding: 4 },
-  searchClearText: { fontSize: 14, color: Colors.textMuted },
+
 
   chipRow: { gap: Spacing.sm, paddingRight: Spacing.base },
   chip: {
@@ -771,7 +774,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   sectionMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
   sectionTotal: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
-  chevron: { fontSize: 16, color: Colors.textMuted, width: 18, textAlign: 'center' },
+
   sectionBody: {
     backgroundColor: Colors.white, borderLeftWidth: 1, borderRightWidth: 1, borderColor: Colors.border,
   },
@@ -791,7 +794,7 @@ const styles = StyleSheet.create({
   amountMuted: { color: Colors.textMuted, textDecorationLine: 'line-through' },
 
   empty: { alignItems: 'center', paddingVertical: 48, gap: 6 },
-  emptyEmoji: { fontSize: 44 },
+
   emptyTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

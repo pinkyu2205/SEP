@@ -115,45 +115,30 @@ export const alreadySentReason = (
 };
 
 /**
- * ─── CHỐT SỐ ĐIỆN VÀO NGÀY CUỐI THÁNG (10/09/2026) ────────────────────────────
+ * ─── CHỐT SỐ ĐIỆN: NGÀY NÀO TRONG THÁNG CŨNG ĐƯỢC (03/10/2026) ─────────────────
  *
- * Luồng điện đổi chiều: trước đây admin phát hành hoá đơn EVN xong mới tới lượt quản lý
- * đi chụp đồng hồ, nên ngày chụp là ngày giấy về — rơi vào giữa tháng sau, mỗi nhà một
- * ngày, và chỉ số đọc được đã trôi qua kỳ mất mấy hôm.
+ * Luồng vẫn là **quản lý chụp trước, admin phát hành sau**: chỉ số chốt xong nằm chờ, KHÔNG
+ * gửi cho khách; admin đẩy hoá đơn EVN của kỳ đó lên thì máy chủ tự nhân đơn giá và phát
+ * hành thẳng cho khách thuê.
  *
- * Nay ngược lại: **quản lý chụp trước, admin phát hành sau**. Hạn chụp là NGÀY CUỐI CÙNG
- * của tháng — cùng một mốc cho mọi nhà, và đúng lúc công tơ khép kỳ. Chỉ số chốt xong nằm
- * chờ, KHÔNG gửi cho khách. Khi admin đẩy hoá đơn EVN của kỳ đó lên, máy chủ tự nhân đơn
- * giá rồi phát hành thẳng cho khách thuê.
+ * Bỏ mốc "ngày cuối tháng" (có từ 10/09/2026): BE commit 303ca9d (02/10/2026) gỡ hẳn việc
+ * điện cuối tháng khỏi danh sách việc lẫn cron nhắc — điện giờ chạy như nước, việc chỉ hiện
+ * khi admin đã đẩy giấy mà còn phòng thiếu số. Quy tắc user chốt 03/10/2026:
  *
- * Nước GIỮ NGUYÊN luồng cũ (admin phát hành → quản lý ghi số → gửi từng phòng).
+ *     CHỤP TRONG THÁNG M LÀ CHỐT CHO HOÁ ĐƠN THÁNG M − 1.
+ *     (ngày 03/10 chụp công tơ → đó là hoá đơn tháng 9)
+ *
+ * Trước đây riêng ngày cuối tháng được tính là kỳ của chính tháng đó — mẹo để "khép kỳ"
+ * đúng hạn cũ. Hết hạn cố định thì mẹo đó chỉ còn làm ngày 31 đột ngột đổi sang kỳ khác.
  */
-
-/** Ngày cuối cùng của tháng chứa `d`. */
-const lastDayOfMonth = (d: Date): number =>
-  new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-
-/** Hôm nay có phải ngày cuối tháng — ngày bắt buộc đi chụp đồng hồ điện. */
-export const isMeterReadingDay = (now: Date = serverNow()): boolean =>
-  now.getDate() === lastDayOfMonth(now);
 
 /**
- * KỲ ĐANG CHỐT SỐ — lệch với `currentPeriod` đúng MỘT ngày trong tháng.
+ * KỲ ĐANG CHỐT SỐ ĐIỆN = tháng trước tháng hiện tại — trùng `currentPeriod`.
  *
- * Ngày cuối tháng 9 quản lý đi chụp là chốt cho kỳ **tháng 9**; nhưng bước sang tháng 10
- * thì việc còn dang dở vẫn là kỳ tháng 9, tức tháng TRƯỚC — đúng thứ `currentPeriod` trả
- * về. Nên chỉ riêng ngày cuối tháng là lấy tháng hiện tại, còn lại rơi về tháng trước.
- *
- * Không gộp vào `currentPeriod` vì hai hàm trả lời hai câu khác nhau: `currentPeriod` là
- * "kỳ nào đang được TÍNH TIỀN" (điện/nước trả sau → luôn tháng trước), còn hàm này là
- * "kỳ nào đang được ĐỌC ĐỒNG HỒ". Nhập một là ngày cuối tháng hai bên lệch nhau.
+ * Giữ tên riêng vì hai câu hỏi khác nhau ("kỳ đang ĐỌC ĐỒNG HỒ" vs "kỳ đang TÍNH TIỀN"),
+ * chỉ là nay chúng có cùng câu trả lời. Muốn đổi quy tắc chụp thì đổi ở đây.
  */
-export const meterReadingPeriod = (now: Date = serverNow()) => {
-  const base = isMeterReadingDay(now)
-    ? new Date(now.getFullYear(), now.getMonth(), 1)
-    : new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return { month: base.getMonth() + 1, year: base.getFullYear() };
-};
+export const meterReadingPeriod = (now: Date = serverNow()) => currentPeriod(now);
 
 /** Cùng kỳ đó ở dạng `yyyy-MM` — dạng DUY NHẤT các API ghi chỉ số nhận. */
 export const meterReadingPeriodIso = (now: Date = serverNow()): string => {
@@ -161,29 +146,23 @@ export const meterReadingPeriodIso = (now: Date = serverNow()): string => {
   return `${year}-${String(month).padStart(2, '0')}`;
 };
 
-/** Hạn chụp của kỳ đang chốt = ngày cuối tháng của kỳ đó, dạng `yyyy-MM-dd`. */
-export const meterReadingDeadline = (now: Date = serverNow()): string => {
+/**
+ * Ngày cuối của kỳ đang chốt, `yyyy-MM-dd`. KHÔNG phải hạn chụp — chỉ để biết hợp đồng nào
+ * thuộc kỳ: khách dọn vào sau ngày này thì chưa có số của kỳ đó (máy chủ chặn bằng
+ * `CONTRACT_NOT_IN_PERIOD`).
+ */
+export const meterReadingPeriodEnd = (now: Date = serverNow()): string => {
   const { month, year } = meterReadingPeriod(now);
   const last = new Date(year, month, 0).getDate();
   return `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
 };
 
-/**
- * Ngày chốt số KẾ TIẾP = ngày cuối của tháng dương lịch hiện tại (chính hôm nay nếu hôm nay
- * là ngày cuối tháng). Dùng để nói với quản lý "kỳ tháng này chụp vào hôm nào" khi màn hình
- * còn đang mở kỳ tháng trước.
- */
-export const nextMeterReadingDate = (now: Date = serverNow()) => {
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-  const mm = String(month).padStart(2, '0');
-  const dd = String(lastDayOfMonth(now)).padStart(2, '0');
-  return { dateLabel: `${dd}/${mm}/${year}`, periodLabel: `${mm}/${year}` };
+/** Câu luật dưới thanh bước của tab Điện — nói rõ số chụp hôm nay thuộc hoá đơn tháng nào. */
+export const meterReadingRuleText = (now: Date = serverNow()): string => {
+  const { month } = meterReadingPeriod(now);
+  return `Chụp ngày nào trong tháng ${now.getMonth() + 1} cũng được — số chốt cho hoá đơn tháng ${month}`
+    + ' · tự phát hành khi admin đẩy hoá đơn EVN';
 };
-
-/** Câu luật hiện dưới thanh bước của tab Điện — thay `UTILITY_WINDOW_TEXT` (chỉ đúng cho nước). */
-export const METER_READING_RULE_TEXT =
-  'Chốt số vào ngày cuối tháng · hoá đơn tự phát hành khi admin đẩy hoá đơn EVN';
 
 /**
  * Câu luật hiện dưới thanh bước của tab NƯỚC (10/09/2026).

@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { DatePickerField } from '@/components/common/DatePickerField';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import { ManagedProperty } from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
@@ -89,15 +90,15 @@ const DEFAULT_TERMS =
   'Điều 4: Không được chuyển nhượng hợp đồng cho bên thứ ba.';
 
 // ===================== CONFIG =====================
-const STATUS_CONFIG: Record<ContractStatus, { label: string; color: string; bg: string; icon: string }> = {
-  draft:            { label: 'Nháp',            color: '#6B7280', bg: '#F3F4F6', icon: '📝' },
-  pending_approval: { label: 'Chờ duyệt',       color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  approved:         { label: 'Đã duyệt',        color: '#3B82F6', bg: '#EFF6FF', icon: '✅' },
-  active:           { label: 'Hiệu lực',        color: '#10B981', bg: '#F0FDF4', icon: '🟢' },
-  rejected:         { label: 'Bị từ chối',      color: '#EF4444', bg: '#FEF2F2', icon: '❌' },
-  expiring_soon:    { label: 'Sắp hết hạn',     color: '#F97316', bg: '#FFF7ED', icon: '⏰' },
-  expired:          { label: 'Đã hết hạn',      color: '#EF4444', bg: '#FEF2F2', icon: '🚫' },
-  terminated:       { label: 'Đã thanh lý',     color: '#94A3B8', bg: '#F8FAFC', icon: '🔒' },
+const STATUS_CONFIG: Record<ContractStatus, { label: string; color: string; bg: string; icon: IconName }> = {
+  draft:            { label: 'Nháp',            color: '#6B7280', bg: '#F3F4F6', icon: 'edit' },
+  pending_approval: { label: 'Chờ duyệt',       color: '#F59E0B', bg: '#FFFBEB', icon: 'hourglass' },
+  approved:         { label: 'Đã duyệt',        color: '#3B82F6', bg: '#EFF6FF', icon: 'verified' },
+  active:           { label: 'Hiệu lực',        color: '#10B981', bg: '#F0FDF4', icon: 'success' },
+  rejected:         { label: 'Bị từ chối',      color: '#EF4444', bg: '#FEF2F2', icon: 'error' },
+  expiring_soon:    { label: 'Sắp hết hạn',     color: '#F97316', bg: '#FFF7ED', icon: 'calendar-clock' },
+  expired:          { label: 'Đã hết hạn',      color: '#EF4444', bg: '#FEF2F2', icon: 'calendar-x' },
+  terminated:       { label: 'Đã thanh lý',     color: '#94A3B8', bg: '#F8FAFC', icon: 'lock' },
 };
 
 const APPROVAL_ACTION_CONFIG: Record<ApprovalEntry['action'], { label: string; color: string }> = {
@@ -227,7 +228,7 @@ const ContractCard: React.FC<{
           </View>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-          <Text style={styles.statusIcon}>{cfg.icon}</Text>
+          <Icon name={cfg.icon} size={12} color={cfg.color} />
           <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
         </View>
       </View>
@@ -263,18 +264,18 @@ const ContractCard: React.FC<{
       {/* Rejection reason banner */}
       {contract.status === 'rejected' && contract.rejectionReason && (
         <View style={styles.rejectionBanner}>
-          <Text style={styles.rejectionBannerText} numberOfLines={2}>
-            ❌ Lý do từ chối: {contract.rejectionReason}
-          </Text>
+          <IconText icon="error" multiline style={styles.rejectionBannerText} numberOfLines={2}>
+            Lý do từ chối: {contract.rejectionReason}
+          </IconText>
         </View>
       )}
 
       {/* Expiry banner */}
       {contract.status === 'expiring_soon' && (
         <View style={styles.expiryBanner}>
-          <Text style={styles.expiryBannerText}>
-            ⏰ Còn {contract.daysUntilExpiry} ngày hết hạn
-          </Text>
+          <IconText icon="calendar-clock" style={styles.expiryBannerText}>
+            Còn {contract.daysUntilExpiry} ngày hết hạn
+          </IconText>
         </View>
       )}
 
@@ -360,7 +361,7 @@ const ContractDetailView: React.FC<{
       {/* Top bar */}
       <View style={detailStyles.topBar}>
         <TouchableOpacity style={detailStyles.backBtn} onPress={onBack}>
-          <Text style={[detailStyles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={detailStyles.topBarTitle} numberOfLines={1}>{contract.code}</Text>
         <View style={{ width: 80 }} />
@@ -369,7 +370,7 @@ const ContractDetailView: React.FC<{
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Status Banner */}
         <View style={[detailStyles.statusBanner, { backgroundColor: cfg.bg, borderColor: cfg.color + '40' }]}>
-          <Text style={detailStyles.statusBannerIcon}>{cfg.icon}</Text>
+          <Icon name={cfg.icon} size={28} color={cfg.color} />
           <View style={{ flex: 1 }}>
             <Text style={[detailStyles.statusBannerLabel, { color: cfg.color }]}>{cfg.label}</Text>
             {contract.status === 'pending_approval' && (
@@ -396,7 +397,7 @@ const ContractDetailView: React.FC<{
         {/* Rejection Alert */}
         {contract.status === 'rejected' && contract.rejectionReason && (
           <View style={detailStyles.rejectionAlert}>
-            <Text style={detailStyles.rejectionAlertTitle}>❌ Lý do từ chối</Text>
+            <IconText icon="error" style={detailStyles.rejectionAlertTitle}>Lý do từ chối</IconText>
             <Text style={detailStyles.rejectionAlertText}>{contract.rejectionReason}</Text>
             <Text style={detailStyles.rejectionAlertSub}>
               Từ chối bởi {contract.rejectedBy} · {contract.rejectedAt}
@@ -530,7 +531,7 @@ const ContractDetailView: React.FC<{
             <View style={detailStyles.section}>
               <SectionHeader title="Xác nhận & Chữ ký" />
               <View style={detailStyles.otpBox}>
-                <Text style={detailStyles.otpBoxIcon}>✅</Text>
+                <Icon name="success" size={24} color={Colors.success} />
                 <View>
                   <Text style={detailStyles.otpBoxLabel}>Đã xác nhận OTP</Text>
                   <Text style={detailStyles.otpBoxSub}>Ngày ký: {contract.signedAt}</Text>
@@ -560,7 +561,7 @@ const ContractDetailView: React.FC<{
                 style={detailStyles.actionBtnPrimary}
                 onPress={() => onAction('submit', contract)}
               >
-                <Text style={detailStyles.actionBtnPrimaryText}>⬆️ Gửi duyệt cho Host</Text>
+                <IconText icon="send" style={detailStyles.actionBtnPrimaryText}>Gửi duyệt cho Host</IconText>
               </TouchableOpacity>
             </>
           )}
@@ -569,7 +570,7 @@ const ContractDetailView: React.FC<{
               style={detailStyles.actionBtnSuccess}
               onPress={() => onAction('activate', contract)}
             >
-              <Text style={detailStyles.actionBtnPrimaryText}>🟢 Kích hoạt hợp đồng</Text>
+              <IconText icon="success" style={detailStyles.actionBtnPrimaryText}>Kích hoạt hợp đồng</IconText>
             </TouchableOpacity>
           )}
           {(contract.status === 'active' || contract.status === 'expiring_soon') && (
@@ -578,13 +579,13 @@ const ContractDetailView: React.FC<{
                 style={detailStyles.actionBtnPrimary}
                 onPress={() => onAction('renew', contract)}
               >
-                <Text style={detailStyles.actionBtnPrimaryText}>🔄 Gia hạn hợp đồng</Text>
+                <IconText icon="refresh" style={detailStyles.actionBtnPrimaryText}>Gia hạn hợp đồng</IconText>
               </TouchableOpacity>
               <TouchableOpacity
                 style={detailStyles.actionBtnDanger}
                 onPress={() => onAction('terminate', contract)}
               >
-                <Text style={detailStyles.actionBtnDangerText}>🔒 Thanh lý hợp đồng</Text>
+                <IconText icon="lock" style={detailStyles.actionBtnDangerText}>Thanh lý hợp đồng</IconText>
               </TouchableOpacity>
             </>
           )}
@@ -593,7 +594,7 @@ const ContractDetailView: React.FC<{
               style={detailStyles.actionBtnPrimary}
               onPress={() => onAction('renew', contract)}
             >
-              <Text style={detailStyles.actionBtnPrimaryText}>🔄 Gia hạn hợp đồng</Text>
+              <IconText icon="refresh" style={detailStyles.actionBtnPrimaryText}>Gia hạn hợp đồng</IconText>
             </TouchableOpacity>
           )}
         </View>
@@ -706,7 +707,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                showAlert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
+                showAlert('Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
               },
             },
           ]
@@ -741,7 +742,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                showAlert('🟢 Hợp đồng đang hiệu lực!', `Hợp đồng ${contract.code} đã được kích hoạt thành công.`);
+                showAlert('Hợp đồng đang hiệu lực!', `Hợp đồng ${contract.code} đã được kích hoạt thành công.`, undefined, 'success');
               },
             },
           ]
@@ -775,7 +776,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                showAlert('✅ Đã gia hạn!', `Hợp đồng ${contract.code} được gia hạn đến 16/05/2027.`);
+                showAlert('Đã gia hạn!', `Hợp đồng ${contract.code} được gia hạn đến 16/05/2027.`, undefined, 'success');
               },
             },
           ]
@@ -809,7 +810,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                showAlert('✅ Đã thanh lý!', `Hợp đồng ${contract.code} đã được thanh lý.`);
+                showAlert('Đã thanh lý!', `Hợp đồng ${contract.code} đã được thanh lý.`, undefined, 'success');
               },
             },
           ]
@@ -837,7 +838,7 @@ export const ContractListScreen: React.FC<Props> = () => {
         <View style={dashStyles.headerLeft}>
           {navigation.canGoBack() && (
             <TouchableOpacity style={dashStyles.backBtn} onPress={() => navigation.goBack()}>
-              <Text style={dashStyles.backBtnText}>‹</Text>
+              <Icon name="back" size={22} color={Colors.primary} />
             </TouchableOpacity>
           )}
           <Text style={dashStyles.headerTitle}>Hợp đồng</Text>
@@ -848,7 +849,7 @@ export const ContractListScreen: React.FC<Props> = () => {
       <View style={dashStyles.tabRow}>
         <View style={[dashStyles.tabPill, dashStyles.tabPillActive]}>
           <Text style={[dashStyles.tabPillText, dashStyles.tabPillTextActive]}>
-            🚪 Hợp đồng với khách thuê ({contracts.length})
+            Hợp đồng với khách thuê ({contracts.length})
           </Text>
         </View>
       </View>
@@ -894,7 +895,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             <Text style={dashStyles.sectionTitle}>Theo bất động sản</Text>
             {buildingCards.length === 0 && (
               <View style={dashStyles.emptyBox}>
-                <Text style={dashStyles.emptyText}>🏠  Chưa có bất động sản nào được phân công</Text>
+                <IconText icon="building" style={dashStyles.emptyText}>Chưa có bất động sản nào được phân công</IconText>
               </View>
             )}
             {buildingCards.map(({ prop, bContracts }) => {
@@ -923,7 +924,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                         <Text style={dashStyles.warningBadgeText}>{needsAction} cần xử lý</Text>
                       </View>
                     ) : (
-                      <Text style={dashStyles.buildingArrow}>›</Text>
+                      <Icon name="chevron-right" size={20} color={Colors.textMuted} />
                     )}
                   </View>
                   <Text style={dashStyles.buildingMeta}>
@@ -1062,7 +1063,7 @@ listContent: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: Spacing.sm, paddingVertical: 5, borderRadius: BorderRadius.full,
   },
-  statusIcon: { fontSize: 11 },
+
   statusText: { fontSize: 11, fontWeight: '700' },
 
   cardBody: { paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm },
@@ -1137,7 +1138,7 @@ const dashStyles = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
   },
-  backBtnText: { fontSize: 24, lineHeight: 26, color: Colors.primary, fontWeight: '900' },
+
   headerTitle: { fontSize: 20, fontWeight: '900', color: Colors.textPrimary },
 
   tabRow: {
@@ -1188,7 +1189,7 @@ const dashStyles = StyleSheet.create({
   },
   buildingCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   buildingName: { flex: 1, fontSize: 14, fontWeight: '900', color: Colors.textPrimary },
-  buildingArrow: { fontSize: 22, color: Colors.textMuted, fontWeight: '700' },
+
   buildingMeta: { fontSize: 11, color: Colors.textSecondary, marginTop: 3, fontWeight: '600' },
   warningBadge: {
     backgroundColor: Colors.warningLight, borderRadius: BorderRadius.full,
@@ -1235,14 +1236,14 @@ const detailStyles = StyleSheet.create({
     borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white,
   },
   backBtn: { width: 80 },
-  backBtnText: { color: Colors.primary, fontWeight: '600', fontSize: 15 },
+
   topBarTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, flex: 1, textAlign: 'center' },
 
   statusBanner: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     margin: Spacing.lg, padding: Spacing.base, borderRadius: BorderRadius.lg, borderWidth: 1,
   },
-  statusBannerIcon: { fontSize: 28 },
+
   statusBannerLabel: { fontSize: 16, fontWeight: '700' },
   statusBannerSub: { fontSize: 12, marginTop: 2, color: Colors.textSecondary },
 
@@ -1329,7 +1330,7 @@ const detailStyles = StyleSheet.create({
     margin: Spacing.base, padding: Spacing.base,
     backgroundColor: Colors.successLight, borderRadius: BorderRadius.md,
   },
-  otpBoxIcon: { fontSize: 24 },
+
   otpBoxLabel: { fontSize: 14, fontWeight: '700', color: Colors.success },
   otpBoxSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 

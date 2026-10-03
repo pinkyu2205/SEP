@@ -1,4 +1,5 @@
 import api from '@/services/api';
+import type { OcrEvnBillResponse } from '@/services/evnBill.service';
 
 /**
  * HOÁ ĐƠN NƯỚC do ADMIN phát hành — bản song sinh của `evnBill.service.ts`.
@@ -48,6 +49,9 @@ export interface WaterBill {
   roomsDone?: number;
   readingDeadline?: string | null;
   overdue?: boolean;
+  /** Phần tính cho khách / phần công ty chịu — xem chú thích cùng tên ở `EvnBill`. */
+  billedToTenantQuantity?: number | null;
+  companyBornQuantity?: number | null;
   createdBy?: string;
   createdAt?: string;
 }
@@ -93,7 +97,7 @@ export const waterBillService = {
     Không có mã nào để tìm, nên nó chỉ tốn công và có nguy cơ vớ nhầm một dãy số khác trên
     giấy rồi trả về như thể đó là mã thật.
   */
-  ocr: (imageUrl: string): Promise<{ rawText?: string; numbers?: string[] }> =>
+  ocr: (imageUrl: string): Promise<OcrEvnBillResponse> =>
     api.post('/api/v1/ocr/evn-bill', { imageUrl, type: 'WATER' }),
 
   create: (input: CreateWaterBillInput): Promise<WaterBill> =>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { registerAlertHost, type AlertRequest, type AlertButton } from '@/utils/showAlert';
+import { Icon, type IconName } from './Icon';
 
 /**
  * Nơi hiển thị mọi thông báo của app. Mount MỘT lần ở App.tsx.
@@ -14,14 +15,31 @@ import { registerAlertHost, type AlertRequest, type AlertButton } from '@/utils/
  * Nhiều thông báo bắn liên tiếp thì xếp hàng, không đè mất cái trước.
  */
 
+type Tone = 'info' | 'success' | 'warning' | 'danger';
+
+const TONE: Record<Tone, { fg: string; bg: string }> = {
+  info:    { fg: Colors.primary, bg: Colors.primaryBg },
+  success: { fg: Colors.success, bg: Colors.successLight },
+  warning: { fg: Colors.warning, bg: Colors.warningLight },
+  danger:  { fg: Colors.error,   bg: Colors.errorLight },
+};
+
+/** Icon do nơi gọi chỉ định thì tông màu suy từ chính icon đó. */
+const TONE_OF_ICON: Partial<Record<IconName, Tone>> = {
+  success: 'success', error: 'danger', alert: 'danger', ban: 'danger',
+  warning: 'warning', lock: 'warning', 'image-off': 'warning',
+};
+
 /** Đoán icon theo tiêu đề để không phải sửa hàng trăm lời gọi showAlert cũ. */
-const guessIcon = (title: string, danger: boolean): string => {
+const guessIcon = (title: string, danger: boolean): { name: IconName; tone: Tone } => {
   const t = title.toLowerCase();
-  if (/lỗi|thất bại|không /.test(t)) return '⚠️';
-  if (/thành công|đã gửi|đã lưu|hoàn tất|đã duyệt|đã thu|đã xác nhận/.test(t)) return '✅';
-  if (/thiếu|chưa |không hợp lệ|yếu|không khớp/.test(t)) return '📝';
-  if (/xoá|xóa|huỷ|hủy|thanh lý|đăng xuất|chấm dứt/.test(t)) return '🚪';
-  return danger ? '⚠️' : 'ℹ️';
+  if (/lỗi|thất bại|không /.test(t)) return { name: 'alert', tone: 'danger' };
+  if (/thành công|đã gửi|đã lưu|hoàn tất|đã duyệt|đã thu|đã xác nhận/.test(t)) return { name: 'success', tone: 'success' };
+  if (/thiếu|chưa |không hợp lệ|yếu|không khớp/.test(t)) return { name: 'warning', tone: 'warning' };
+  if (/đăng xuất/.test(t)) return { name: 'logout', tone: 'danger' };
+  if (/xoá|xóa/.test(t)) return { name: 'trash', tone: 'danger' };
+  if (/huỷ|hủy|thanh lý|chấm dứt/.test(t)) return { name: 'alert', tone: 'danger' };
+  return danger ? { name: 'warning', tone: 'danger' } : { name: 'info', tone: 'info' };
 };
 
 export const AlertHost: React.FC = () => {
@@ -43,7 +61,10 @@ export const AlertHost: React.FC = () => {
     : [{ text: 'OK' }];
   const cancelBtn = buttons.find(b => b.style === 'cancel');
   const hasDanger = buttons.some(b => b.style === 'destructive');
-  const icon = current.icon ?? guessIcon(current.title, hasDanger);
+  const icon = current.icon
+    ? { name: current.icon, tone: hasDanger ? 'danger' as const : TONE_OF_ICON[current.icon] ?? 'info' }
+    : guessIcon(current.title, hasDanger);
+  const tone = TONE[icon.tone];
   // >2 nút thì xếp dọc cho đỡ chật.
   const stacked = buttons.length > 2;
 
@@ -57,8 +78,8 @@ export const AlertHost: React.FC = () => {
         onPress={cancelBtn ? () => dismiss(cancelBtn) : undefined}
       >
         <TouchableOpacity style={s.box} activeOpacity={1}>
-          <View style={[s.iconWrap, hasDanger && s.iconWrapDanger]}>
-            <Text style={s.icon}>{icon}</Text>
+          <View style={[s.iconWrap, { backgroundColor: tone.bg }]}>
+            <Icon name={icon.name} size={26} color={tone.fg} />
           </View>
 
           <Text style={s.title}>{current.title}</Text>
@@ -99,11 +120,9 @@ const s = StyleSheet.create({
     borderRadius: BorderRadius.xl, padding: Spacing.lg, alignItems: 'center', ...Shadow.lg,
   },
   iconWrap: {
-    width: 52, height: 52, borderRadius: 26, backgroundColor: Colors.primaryBg,
+    width: 52, height: 52, borderRadius: 26,
     alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
   },
-  iconWrapDanger: { backgroundColor: Colors.errorLight },
-  icon:    { fontSize: 24 },
   title:   { fontSize: 17, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
   message: { fontSize: 13.5, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: 6 },
 

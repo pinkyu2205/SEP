@@ -5,6 +5,7 @@ import {
 import { Colors, Spacing, Shadow } from '@/constants';
 import { PropertyListing } from '@/types';
 import { formatCurrency } from '@/utils/helpers';
+import { Icon, IconText } from './Icon';
 
 interface PropertyCardProps {
   property: PropertyListing;
@@ -31,7 +32,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
         <Image source={{ uri: photo }} style={styles.imgFill} resizeMode="cover" />
       ) : (
         <View style={styles.imgFallback}>
-          <Text style={{ fontSize: 44 }}>🏠</Text>
+          <Icon name="home" size={40} color={Colors.primaryLight} />
         </View>
       )}
       {/* Bottom scrim */}
@@ -63,9 +64,9 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
         <ImageBlock height={158} />
         <View style={styles.vBody}>
           <Text style={styles.vTitle} numberOfLines={2}>{property.name}</Text>
-          <Text style={styles.addr} numberOfLines={1}>
-            📍 {property.ward}, {property.city}
-          </Text>
+          <IconText icon="location" iconColor={Colors.textMuted} gap={4} style={styles.addr} numberOfLines={1}>
+            {property.ward}, {property.city}
+          </IconText>
           {property.availableRooms > 0 && (
             <View style={styles.row}>
               <View style={styles.dotGreen} />
@@ -83,16 +84,16 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
       <ImageBlock height={190} />
       <View style={styles.hBody}>
         <Text style={styles.hTitle} numberOfLines={2}>{property.name}</Text>
-        <Text style={styles.addr} numberOfLines={1}>
-          📍 {property.ward}, {property.city}
-        </Text>
+        <IconText icon="location" iconColor={Colors.textMuted} gap={4} style={styles.addr} numberOfLines={1}>
+          {property.ward}, {property.city}
+        </IconText>
 
         <View style={styles.metaRow}>
-          <Text style={styles.metaTxt}>📐 {property.area}m²</Text>
+          <IconText icon="area" iconColor={Colors.textMuted} gap={4} style={styles.metaTxt}>{property.area}m²</IconText>
           {isWholeHouse && (
             <>
               <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.metaTxt}>🛏 {property.totalRooms} phòng</Text>
+              <IconText icon="bed" iconColor={Colors.textMuted} gap={4} style={styles.metaTxt}>{property.totalRooms} phòng</IconText>
             </>
           )}
         </View>

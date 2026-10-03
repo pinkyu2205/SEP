@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius } from '@/constants';
-import { Button } from '@/components/common';
+import { Button, Icon } from '@/components/common';
 import { useNavigation } from '@react-navigation/native';
 
 /**
@@ -25,11 +25,13 @@ export const ForgotPasswordScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Text style={styles.emoji}>🔑</Text>
+          <View style={styles.heroIcon}>
+            <Icon name="key" size={32} color={Colors.primary} />
+          </View>
           <Text style={styles.title}>Quên mật khẩu</Text>
           <Text style={styles.subtitle}>
             Hiện chưa thể tự đặt lại mật khẩu trong ứng dụng. Vui lòng liên hệ để được cấp lại.
@@ -73,9 +75,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.white },
   container: { padding: Spacing.xl, paddingBottom: Spacing['2xl'] },
   backBtn: { marginBottom: Spacing.xl, alignSelf: 'flex-start' },
-  backText: { color: Colors.primary, fontWeight: '600', fontSize: 16 },
   header: { alignItems: 'center', marginBottom: Spacing.xl },
-  emoji: { fontSize: 64, marginBottom: Spacing.md },
+  heroIcon: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.primaryBg,
+    alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+  },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
   subtitle: { fontSize: 15, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: Spacing.md },
   card: {

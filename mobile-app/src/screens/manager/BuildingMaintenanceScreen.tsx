@@ -11,31 +11,32 @@ import type { MaintenanceTicket, TicketStatus, TicketCategory } from '@/store/ma
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { MAINTENANCE_STATUS_META } from '@/constants/maintenance';
+import { Dot, Icon, IconText, type IconName } from '@/components/common/Icon';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: string }> =
+const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: IconName }> =
   MAINTENANCE_STATUS_META;
 
 const PRIORITY_CONFIG = {
-  urgent: { label: '🚨 Khẩn cấp',  color: '#EF4444', bg: '#FEF2F2' },
-  high:   { label: '🔴 Cao',        color: '#F97316', bg: '#FFF7ED' },
-  medium: { label: '🟡 Trung bình', color: '#F59E0B', bg: '#FFFBEB' },
-  low:    { label: '🟢 Thấp',       color: '#10B981', bg: '#F0FDF4' },
+  urgent: { label: 'Khẩn cấp',   color: '#EF4444', bg: '#FEF2F2' },
+  high:   { label: 'Cao',        color: '#F97316', bg: '#FFF7ED' },
+  medium: { label: 'Trung bình', color: '#F59E0B', bg: '#FFFBEB' },
+  low:    { label: 'Thấp',       color: '#10B981', bg: '#F0FDF4' },
 } as const;
 
-const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> = {
-  appliance:  { label: 'Trang thiết bị', icon: '📺' },
-  furniture:  { label: 'Nội thất',       icon: '🪑' },
-  plumbing:   { label: 'Nước',           icon: '🚰' },
-  electrical: { label: 'Điện',           icon: '⚡' },
+const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: IconName }> = {
+  appliance:  { label: 'Trang thiết bị', icon: 'ac' },
+  furniture:  { label: 'Nội thất',       icon: 'sofa' },
+  plumbing:   { label: 'Nước',           icon: 'bath' },
+  electrical: { label: 'Điện',           icon: 'electric' },
 };
 
 // Quick action trên card: OPEN → mở màn chi tiết để duyệt (duyệt BẮT BUỘC chọn
 // category, hoặc báo lỗi khách — không xử lý nhanh ngay trên card được).
 const QUICK_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
-  open: '✅ Xử lý yêu cầu',
-  repair_scheduled: '🔧 Bắt đầu sửa',
+  open: 'Xử lý yêu cầu',
+  repair_scheduled: 'Bắt đầu sửa',
 };
 
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
@@ -80,12 +81,13 @@ const TicketCard: React.FC<{
         <Text style={s.cardCode}>{ticket.ticketCode}</Text>
         {priCfg && (
           <View style={[s.priBadge, { backgroundColor: priCfg.bg }]}>
+            <Dot color={priCfg.color} size={5} />
             <Text style={[s.priBadgeText, { color: priCfg.color }]}>{priCfg.label}</Text>
           </View>
         )}
         <View style={s.row1Spacer} />
         <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
-          <Text style={s.statusIcon}>{cfg.icon}</Text>
+          <Icon name={cfg.icon} size={10} color={cfg.color} />
           <Text style={[s.statusText, { color: cfg.color }]}>{cfg.label}</Text>
         </View>
       </View>
@@ -97,18 +99,24 @@ const TicketCard: React.FC<{
 
       {/* Row 3: Meta */}
       <View style={s.cardMeta}>
-        <Text style={s.metaItem}>🚪 {ticket.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : ticket.roomName}</Text>
+        <IconText icon="door" gap={3} iconSize={11} style={s.metaItem}>
+          {ticket.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : ticket.roomName}
+        </IconText>
         <Text style={s.metaDot}>·</Text>
-        <Text style={s.metaItem}>👤 {ticket.tenantName}</Text>
+        <IconText icon="user" gap={3} iconSize={11} style={s.metaItem}>{ticket.tenantName}</IconText>
         <Text style={s.metaDot}>·</Text>
-        <Text style={s.metaItem}>{catCfg ? `${catCfg.icon} ${catCfg.label}` : '🏷 Chưa phân loại'}</Text>
+        <IconText icon={catCfg ? catCfg.icon : 'tag'} gap={3} iconSize={11} style={s.metaItem}>
+          {catCfg ? catCfg.label : 'Chưa phân loại'}
+        </IconText>
       </View>
 
       {/* Row 4: Date + assigned */}
       <View style={s.cardFooter}>
-        <Text style={s.cardDate}>📅 {formatDateTime(ticket.createdAt)}</Text>
+        <IconText icon="calendar" gap={3} iconSize={11} style={s.cardDate}>{formatDateTime(ticket.createdAt)}</IconText>
         {ticket.assignedTo && (
-          <Text style={s.cardAssigned} numberOfLines={1}>🔧 {ticket.assignedTo.split(' ')[0]}</Text>
+          <IconText icon="hard-hat" gap={3} iconSize={11} style={s.cardAssigned} numberOfLines={1}>
+            {ticket.assignedTo.split(' ')[0]}
+          </IconText>
         )}
         {/* `!== undefined` KHÔNG chắn được null — BE trả null cho phiếu chưa nhập chi phí,
             và null lọt qua điều kiện này rồi nổ ở toLocaleString. Dùng `!= null` chắn cả hai. */}
@@ -124,9 +132,9 @@ const TicketCard: React.FC<{
           onPress={() => onAction(ticket)}
           activeOpacity={0.75}
         >
-          <Text style={[s.actionBtnText, isUrgentOpen && { color: Colors.error }]}>
-            {nextAct} →
-          </Text>
+          <IconText icon="arrow-right" trailing gap={3} iconSize={12} style={[s.actionBtnText, isUrgentOpen && { color: Colors.error }]}>
+            {nextAct}
+          </IconText>
         </TouchableOpacity>
       )}
     </TouchableOpacity>
@@ -236,26 +244,26 @@ export const BuildingMaintenanceScreen: React.FC = () => {
 
   const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
     { id: 'all',         label: 'Tất cả' },
-    { id: 'pending',     label: '⏳ Chờ' },
-    { id: 'in_progress', label: '🔧 Đang xử lý' },
-    { id: 'resolved',    label: '✅ Hoàn tất' },
-    { id: 'cancelled',   label: '✕ Đã hủy' },
+    { id: 'pending',     label: 'Chờ' },
+    { id: 'in_progress', label: 'Đang xử lý' },
+    { id: 'resolved',    label: 'Hoàn tất' },
+    { id: 'cancelled',   label: 'Đã hủy' },
   ];
 
   const CAT_FILTERS: { id: CategoryFilter; label: string }[] = [
     { id: 'all',        label: 'Tất cả' },
-    { id: 'appliance',  label: '📺 Thiết bị' },
-    { id: 'furniture',  label: '🪑 Nội thất' },
-    { id: 'plumbing',   label: '🚰 Nước' },
-    { id: 'electrical', label: '⚡ Điện' },
+    { id: 'appliance',  label: 'Thiết bị' },
+    { id: 'furniture',  label: 'Nội thất' },
+    { id: 'plumbing',   label: 'Nước' },
+    { id: 'electrical', label: 'Điện' },
   ];
 
   const PRIO_FILTERS: { id: PriorityFilter; label: string }[] = [
     { id: 'all',    label: 'Mọi mức độ' },
-    { id: 'urgent', label: '🚨 Khẩn cấp' },
-    { id: 'high',   label: '🔴 Cao' },
-    { id: 'medium', label: '🟡 Trung bình' },
-    { id: 'low',    label: '🟢 Thấp' },
+    { id: 'urgent', label: 'Khẩn cấp' },
+    { id: 'high',   label: 'Cao' },
+    { id: 'medium', label: 'Trung bình' },
+    { id: 'low',    label: 'Thấp' },
   ];
 
   return (
@@ -264,7 +272,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
       {/* ── Header ───────────────────────────────────────────────── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backIcon}>‹</Text>
+          <Icon name="back" size={28} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle} numberOfLines={1}>{propertyName}</Text>
@@ -309,7 +317,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
 
       {/* ── Search ───────────────────────────────────────────────── */}
       <View style={s.searchBar}>
-        <Text style={s.searchIcon}>🔍</Text>
+        <Icon name="search" size={15} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
           placeholder={isWholeHouse ? 'Tìm ticket, người đại diện, thiết bị...' : 'Tìm ticket, phòng, khách thuê...'}
@@ -318,8 +326,8 @@ export const BuildingMaintenanceScreen: React.FC = () => {
           onChangeText={setSearch}
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={s.searchClear}>✕</Text>
+          <TouchableOpacity onPress={() => setSearch('')} style={s.searchClear}>
+            <Icon name="close" size={14} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -389,7 +397,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
             </View>
           ) : loadError ? (
             <View style={s.emptyState}>
-              <Text style={{ fontSize: 40 }}>⚠️</Text>
+              <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} />
               <Text style={s.emptyText}>Không tải được danh sách ticket</Text>
               <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); load(); }}>
                 <Text style={s.retryBtnText}>Thử lại</Text>
@@ -397,7 +405,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
             </View>
           ) : (
             <View style={s.emptyState}>
-              <Text style={{ fontSize: 40 }}>🔧</Text>
+              <Icon name="wrench" size={40} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={s.emptyText}>Không có ticket phù hợp</Text>
               <Text style={s.emptySubText}>Thử thay đổi bộ lọc hoặc tìm kiếm</Text>
             </View>
@@ -420,7 +428,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white,
   },
   backBtn:    { padding: 4 },
-  backIcon:   { fontSize: 30, color: Colors.primary, fontWeight: '300', lineHeight: 34 },
+
   headerTitle:{ fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   headerSub:  { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
 
@@ -448,9 +456,9 @@ const s = StyleSheet.create({
     ...Shadow.sm, marginBottom: 8,
     borderWidth: 1, borderColor: Colors.border,
   },
-  searchIcon:  { fontSize: 14 },
+
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary },
-  searchClear: { fontSize: 13, color: Colors.textMuted, fontWeight: '600', padding: 4 },
+  searchClear: { padding: 4 },
 
   // Filter chips
   // Chip xuống dòng (flexWrap) thay vì cuộn ngang — không bị ép chiều cao, thấy hết lựa chọn.
@@ -480,10 +488,13 @@ const s = StyleSheet.create({
   cardRow1:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5 },
   row1Spacer: { flex: 1 },
   cardCode:   { fontSize: 10, fontWeight: '700', color: Colors.primary, letterSpacing: 0.4 },
-  priBadge:   { paddingHorizontal: 5, paddingVertical: 2, borderRadius: BorderRadius.full },
+  priBadge:   {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 5, paddingVertical: 2, borderRadius: BorderRadius.full,
+  },
   priBadgeText:{ fontSize: 9, fontWeight: '700' },
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 7, paddingVertical: 2, borderRadius: BorderRadius.full },
-  statusIcon:  { fontSize: 9 },
+
   statusText:  { fontSize: 9, fontWeight: '700' },
 
   cardTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 4 },

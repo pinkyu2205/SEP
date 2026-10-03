@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Text, TouchableOpacity, StyleSheet, StyleProp, TextStyle } from 'react-native';
 import { Colors } from '@/constants';
 import { maskTenantPhone, maskTenantCccd } from '@/constants/managerVisibility';
+import { Icon } from './Icon';
 
 /**
  * GIÁ TRỊ CHE — BẤM ĐỂ XEM ĐỦ (SĐT / CCCD khách thuê trên app manager, 24/09/2026).
@@ -32,7 +33,7 @@ export const MaskedValue: React.FC<{
       style={s.wrap}
     >
       <Text style={[style, s.value]} selectable={shown}>{shown ? v : masked}</Text>
-      <Text style={s.eye}>{shown ? '🙈' : '👁'}</Text>
+      <Icon name={shown ? 'eye-off' : 'eye'} size={16} color={Colors.primary} />
     </TouchableOpacity>
   );
 };
@@ -40,6 +41,6 @@ export const MaskedValue: React.FC<{
 const s = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   value: { letterSpacing: 0.5 },
-  eye: { fontSize: 14, color: Colors.primary },
+
   empty: { color: Colors.textMuted },
 });

@@ -12,7 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, BorderRadius, Typography, Shadow } from '@/constants';
-import { SearchBar, FilterChips, PickerModal } from '@/components/common';
+import { SearchBar, FilterChips, PickerModal, Icon, IconText } from '@/components/common';
+import type { FilterChipOption } from '@/components/common/FilterChips';
 import { searchService } from '@/services';
 import { City, Ward, SearchFilters } from '@/types';
 import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
@@ -20,15 +21,15 @@ import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'Search'>;
 type RouteProps = RouteProp<GuestStackParamList, 'Search'>;
 
-const AMENITIES_OPTIONS = [
-  { id: 'Máy lạnh', label: 'Máy lạnh', icon: '❄️' },
-  { id: 'Wifi', label: 'Wifi', icon: '📶' },
-  { id: 'Máy giặt', label: 'Máy giặt', icon: '🧺' },
-  { id: 'Giữ xe', label: 'Giữ xe', icon: '🅿️' },
-  { id: 'Bảo vệ', label: 'Bảo vệ', icon: '🔒' },
-  { id: 'Bếp riêng', label: 'Bếp riêng', icon: '🍳' },
-  { id: 'Gác lửng', label: 'Gác lửng', icon: '🌙' },
-  { id: 'Ban công', label: 'Ban công', icon: '🏗️' },
+const AMENITIES_OPTIONS: FilterChipOption[] = [
+  { id: 'Máy lạnh', label: 'Máy lạnh', icon: 'snowflake' },
+  { id: 'Wifi', label: 'Wifi', icon: 'wifi' },
+  { id: 'Máy giặt', label: 'Máy giặt', icon: 'washer' },
+  { id: 'Giữ xe', label: 'Giữ xe', icon: 'parking' },
+  { id: 'Bảo vệ', label: 'Bảo vệ', icon: 'shield' },
+  { id: 'Bếp riêng', label: 'Bếp riêng', icon: 'kitchen' },
+  { id: 'Gác lửng', label: 'Gác lửng', icon: 'layers' },
+  { id: 'Ban công', label: 'Ban công', icon: 'leaf' },
 ];
 
 const AREA_OPTIONS = [
@@ -179,7 +180,7 @@ export const SearchScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backIcon}>←</Text>
+          <Icon name="back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Tìm kiếm</Text>
@@ -198,7 +199,7 @@ export const SearchScreen: React.FC = () => {
         {renderAnimatedSection(0,
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>🔎</Text>
+              <Icon name="search" size={18} color={Colors.primary} />
               <Text style={styles.sectionTitle}>Từ khoá</Text>
             </View>
             <SearchBar
@@ -215,7 +216,7 @@ export const SearchScreen: React.FC = () => {
         {renderAnimatedSection(1,
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>📍</Text>
+              <Icon name="location" size={18} color={Colors.primary} />
               <Text style={styles.sectionTitle}>Vị trí</Text>
             </View>
 
@@ -227,7 +228,7 @@ export const SearchScreen: React.FC = () => {
               <Text style={selectedCityId ? styles.pickerText : styles.pickerPlaceholder}>
                 {selectedCityName || 'Chọn Thành phố'}
               </Text>
-              <Text style={styles.pickerIcon}>▼</Text>
+              <Icon name="chevron-down" size={16} color={Colors.textMuted} />
             </TouchableOpacity>
 
             <Text style={[styles.label, { marginTop: Spacing.md }]}>Phường / Xã</Text>
@@ -241,7 +242,7 @@ export const SearchScreen: React.FC = () => {
                   ? `Đã chọn ${selectedWardIds.length} phường`
                   : 'Chọn Phường / Xã'}
               </Text>
-              <Text style={styles.pickerIcon}>▼</Text>
+              <Icon name="chevron-down" size={16} color={Colors.textMuted} />
             </TouchableOpacity>
 
             {wards.length > 0 && (
@@ -262,7 +263,7 @@ export const SearchScreen: React.FC = () => {
         {renderAnimatedSection(2,
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>💰</Text>
+              <Icon name="cash" size={18} color={Colors.primary} />
               <Text style={styles.sectionTitle}>Khoảng giá</Text>
             </View>
             <Text style={styles.label}>Khoảng giá (VNĐ)</Text>
@@ -296,7 +297,7 @@ export const SearchScreen: React.FC = () => {
         {renderAnimatedSection(3,
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>📐</Text>
+              <Icon name="area" size={18} color={Colors.primary} />
               <Text style={styles.sectionTitle}>Diện tích</Text>
             </View>
             <FilterChips
@@ -312,7 +313,7 @@ export const SearchScreen: React.FC = () => {
         {renderAnimatedSection(4,
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>✨</Text>
+              <Icon name="grid" size={18} color={Colors.primary} />
               <Text style={styles.sectionTitle}>Tiện ích</Text>
             </View>
             <FilterChips
@@ -330,10 +331,10 @@ export const SearchScreen: React.FC = () => {
       {/* Floating Action Buttons */}
       <View style={styles.footer}>
         <TouchableOpacity style={styles.resetBtn} onPress={resetFilters}>
-          <Text style={styles.resetText}>↺ Xóa bộ lọc</Text>
+          <IconText icon="undo" style={styles.resetText}>Xóa bộ lọc</IconText>
         </TouchableOpacity>
         <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
-          <Text style={styles.searchText}>🔍 Tìm kiếm</Text>
+          <IconText icon="search" style={styles.searchText}>Tìm kiếm</IconText>
         </TouchableOpacity>
       </View>
 
@@ -379,10 +380,7 @@ const styles = StyleSheet.create({
     padding: Spacing.xs,
     width: 40,
   },
-  backIcon: {
-    fontSize: 24,
-    color: Colors.textPrimary,
-  },
+
   headerCenter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -426,9 +424,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     gap: Spacing.sm,
   },
-  sectionIcon: {
-    fontSize: 18,
-  },
+
   sectionTitle: {
     ...Typography.h4,
   },
@@ -459,10 +455,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.textMuted,
   },
-  pickerIcon: {
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
+
   quickWards: {
     marginTop: Spacing.md,
   },

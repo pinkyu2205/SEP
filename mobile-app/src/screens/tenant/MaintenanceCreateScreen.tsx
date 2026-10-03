@@ -24,6 +24,7 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
 import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
 import { MAINTENANCE_VISIT_SLOT_MINUTES } from '@/constants/maintenance';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
@@ -32,10 +33,10 @@ const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thi�
 // docs/maintenance-implementation-spec.md §3.4). APPLIANCE/FURNITURE là thiết bị nên
 // đi theo nhánh có equipmentId; nhánh không gắn thiết bị chỉ còn 2 loại cố định trong phòng.
 const NON_EQUIPMENT_CATEGORIES: {
-  value: string; emoji: string; label: string; subtitle: string; placeholder: string;
+  value: string; icon: IconName; label: string; subtitle: string; placeholder: string;
 }[] = [
-  { value: 'ELECTRICAL', emoji: '⚡', label: 'Điện cố định', subtitle: 'Ổ cắm, đèn, cầu dao', placeholder: 'vd. Ổ cắm cháy / đèn không sáng...' },
-  { value: 'PLUMBING', emoji: '🚰', label: 'Nước / WC', subtitle: 'Vòi, ống, toilet, thoát sàn', placeholder: 'vd. Vòi rò / bồn cầu tắc...' },
+  { value: 'ELECTRICAL', icon: 'electric', label: 'Điện cố định', subtitle: 'Ổ cắm, đèn, cầu dao', placeholder: 'vd. Ổ cắm cháy / đèn không sáng...' },
+  { value: 'PLUMBING', icon: 'bath', label: 'Nước / WC', subtitle: 'Vòi, ống, toilet, thoát sàn', placeholder: 'vd. Vòi rò / bồn cầu tắc...' },
 ];
 
 /**
@@ -183,7 +184,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
       const result = validateEquipmentPhoto(equipmentName, labels);
       if (result.status === 'match') {
         push({ uri: url, check: 'verified', mediaType: 'image' });
-        setPhotoNote({ tone: 'ok', text: `✓ Đã nhận ra ${equipClass?.label ?? 'thiết bị'} trong ảnh.` });
+        setPhotoNote({ tone: 'ok', text: `Đã nhận ra ${equipClass?.label ?? 'thiết bị'} trong ảnh.` });
       } else if (result.status === 'mismatch') {
         push({ uri: url, check: 'rejected', mediaType: 'image' });
         setPhotoNote({ tone: 'warn', text: `${result.reason ?? ''} Ảnh vẫn được giữ làm ảnh mô tả chỗ hỏng.` });
@@ -251,7 +252,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
         'Ảnh có vẻ không phải thiết bị này',
         `Ảnh bạn đính đọc ra thông số không khớp với ${equipClass?.label ?? 'thiết bị'} đang báo hỏng. `
         + 'Kiểm tra lại xem có chụp nhầm không, hoặc chụp thêm một tấm lấy rõ thân máy.',
-        undefined, '📷',
+        undefined, 'image-off',
       );
       return;
     }
@@ -332,7 +333,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
       await realMaintenanceService.createRequest(body);
       setSubmitting(false);
       showAlert(
-        '🔧 Gửi yêu cầu thành công!',
+        'Gửi yêu cầu thành công!',
         'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý vận hành sẽ tiếp nhận và phản hồi sớm nhất.',
         [{ text: 'OK', onPress: () => navigation.goBack() }],
       );
@@ -351,7 +352,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Hủy</Text>
+          <Text style={styles.backBtnText}>Hủy</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {equipment ? 'Báo hỏng thiết bị' : 'Yêu cầu sửa chữa'}
@@ -363,10 +364,10 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
         {previousRequestId && (
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>
-              🔁 Tạo yêu cầu mới nối tiếp phiếu #{previousRequestId} — dùng khi lần sửa trước
+            <IconText icon="refresh" multiline style={styles.noticeText}>
+              Tạo yêu cầu mới nối tiếp phiếu #{previousRequestId} — dùng khi lần sửa trước
               chưa ổn. Quản lý sẽ xem lại lịch sử phiếu cũ khi xử lý.
-            </Text>
+            </IconText>
           </View>
         )}
 
@@ -375,19 +376,19 @@ export const MaintenanceCreateScreen: React.FC = () => {
           <View style={styles.equipmentCard}>
             <View style={styles.equipmentCardHeader}>
               <View style={styles.equipmentIconWrap}>
-                <Text style={{ fontSize: 22 }}>⚙️</Text>
+                <Icon name="package" size={22} color={Colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.equipmentName}>{equipName(equipment)}</Text>
                 {(equipment.roomName || equipment.roomNumber) && (
-                  <Text style={styles.equipmentMeta}>📍 {equipment.roomName ?? equipment.roomNumber}</Text>
+                  <IconText icon="location" gap={4} style={styles.equipmentMeta}>{equipment.roomName ?? equipment.roomNumber}</IconText>
                 )}
                 {equipment.qrCode && (
                   <Text style={styles.equipmentQr}>QR: {equipment.qrCode}</Text>
                 )}
               </View>
               <View style={styles.qrBadge}>
-                <Text style={styles.qrBadgeText}>📷 QR</Text>
+                <IconText icon="qr" gap={4} iconSize={12} style={styles.qrBadgeText}>QR</IconText>
               </View>
             </View>
 
@@ -425,7 +426,12 @@ export const MaintenanceCreateScreen: React.FC = () => {
                     onPress={() => setCategory(c.value)}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.categoryEmoji}>{c.emoji}</Text>
+                    <Icon
+                      name={c.icon}
+                      size={22}
+                      color={active ? Colors.primary : Colors.textSecondary}
+                      style={styles.categoryIcon}
+                    />
                     <Text style={[styles.categoryLabel, active && styles.categoryLabelActive]}>{c.label}</Text>
                     <Text style={styles.categorySubtitle}>{c.subtitle}</Text>
                   </TouchableOpacity>
@@ -468,7 +474,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
             </>
           ) : (
             <TouchableOpacity onPress={() => setDescExpanded(true)}>
-              <Text style={styles.addDescLink}>✎ Thêm mô tả (không bắt buộc)</Text>
+              <IconText icon="plus" gap={4} style={styles.addDescLink}>Thêm mô tả (không bắt buộc)</IconText>
             </TouchableOpacity>
           )}
         </View>
@@ -483,19 +489,19 @@ export const MaintenanceCreateScreen: React.FC = () => {
           )}
           <View style={styles.imageRow}>
             <TouchableOpacity style={styles.imageAddBtn} onPress={takePhoto} disabled={checking}>
-              <Text style={styles.imageAddEmoji}>📷</Text>
+              <Icon name="camera" size={24} color={Colors.primary} style={styles.imageAddIcon} />
               <Text style={styles.imageAddText}>{checking ? 'Đang kiểm ảnh…' : 'Chụp ảnh'}</Text>
             </TouchableOpacity>
             {Platform.OS !== 'web' && (
               <TouchableOpacity style={styles.imageAddBtn} onPress={takeVideo} disabled={checking}>
-                <Text style={styles.imageAddEmoji}>🎥</Text>
+                <Icon name="video" size={24} color={Colors.primary} style={styles.imageAddIcon} />
                 <Text style={styles.imageAddText}>Quay video</Text>
               </TouchableOpacity>
             )}
             {/* Đồ không có tem nhãn không kiểm được nội dung ảnh → chỉ nhận ảnh/video chụp tại chỗ. */}
             {!liveOnly && (
               <TouchableOpacity style={styles.imageAddBtn} onPress={pickImage} disabled={checking}>
-                <Text style={styles.imageAddEmoji}>🖼️</Text>
+                <Icon name="images" size={24} color={Colors.primary} style={styles.imageAddIcon} />
                 <Text style={styles.imageAddText}>Thư viện</Text>
               </TouchableOpacity>
             )}
@@ -519,7 +525,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
                     >
                       {isVideo ? (
                         <View style={[styles.imagePreview, styles.videoPreviewTile]}>
-                          <Text style={{ fontSize: 22 }}>🎬</Text>
+                          <Icon name="play" size={20} color={Colors.white} fill={Colors.white} />
                           <Text style={styles.videoPreviewDuration}>{formatDurationLabel(img.durationMs)}</Text>
                         </View>
                       ) : (
@@ -530,13 +536,13 @@ export const MaintenanceCreateScreen: React.FC = () => {
                         nói gì, đỡ hiểu nhầm là app đã xác nhận (video luôn 'unchecked'). */}
                     {needsVerifiedPhoto && img.check !== 'unchecked' && (
                       <View style={[styles.imageBadge, img.check === 'verified' ? styles.imageBadgeOk : styles.imageBadgeWarn]}>
-                        <Text style={styles.imageBadgeText}>
-                          {img.check === 'verified' ? '✓ Đúng thiết bị' : 'Ảnh mô tả'}
-                        </Text>
+                        {img.check === 'verified'
+                          ? <IconText icon="check" gap={2} iconSize={10} style={styles.imageBadgeText}>Đúng thiết bị</IconText>
+                          : <Text style={styles.imageBadgeText}>Ảnh mô tả</Text>}
                       </View>
                     )}
                     <TouchableOpacity style={styles.imageRemoveBtn} onPress={() => removeImage(idx)}>
-                      <Text style={{ color: Colors.white, fontSize: 10, fontWeight: '700' }}>✕</Text>
+                      <Icon name="close" size={11} color={Colors.white} strokeWidth={3} />
                     </TouchableOpacity>
                   </View>
                 );
@@ -570,11 +576,11 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
         {/* Lưu ý */}
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>
+          <IconText icon="info" multiline style={styles.noticeText}>
             {equipment
-              ? `💡 Thông tin thiết bị "${equipName(equipment)}" sẽ được gửi kèm yêu cầu giúp quản lý xử lý nhanh hơn.`
-              : '💡 Sau khi gửi, quản lý sẽ tiếp nhận và phân công thợ trong vòng 24-48 giờ làm việc. Bạn sẽ nhận thông báo khi có cập nhật.'}
-          </Text>
+              ? `Thông tin thiết bị "${equipName(equipment)}" sẽ được gửi kèm yêu cầu giúp quản lý xử lý nhanh hơn.`
+              : 'Sau khi gửi, quản lý sẽ tiếp nhận và phân công thợ trong vòng 24-48 giờ làm việc. Bạn sẽ nhận thông báo khi có cập nhật.'}
+          </IconText>
         </View>
 
         <TouchableOpacity
@@ -583,7 +589,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
           disabled={!isValid || submitting}
         >
           <Text style={styles.submitBtnText}>
-            {submitting ? 'Đang gửi...' : '🔧 Gửi yêu cầu sửa chữa'}
+            {submitting ? 'Đang gửi...' : 'Gửi yêu cầu sửa chữa'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -657,7 +663,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: Colors.border, padding: Spacing.md,
   },
   categoryCardActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  categoryEmoji: { fontSize: 22, marginBottom: 4 },
+  categoryIcon: { marginBottom: 4 },
   categoryLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   categoryLabelActive: { color: Colors.primary },
   categorySubtitle: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
@@ -667,7 +673,7 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: Colors.white, borderRadius: BorderRadius.md, padding: Spacing.md,
     alignItems: 'center', borderWidth: 1, borderColor: Colors.border, borderStyle: 'dashed',
   },
-  imageAddEmoji: { fontSize: 24, marginBottom: 4 },
+  imageAddIcon: { marginBottom: 4 },
   imageAddText: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary },
   imagePreviewRow: { flexDirection: 'row', marginBottom: Spacing.sm },
   imagePreviewWrap: { marginRight: Spacing.sm, position: 'relative' },

@@ -12,6 +12,7 @@ import {
   invoiceKind, invoiceAmountText,
 } from '@/services/manager/invoiceService';
 import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 const SH = Dimensions.get('window').height;
 
@@ -31,12 +32,12 @@ const SH = Dimensions.get('window').height;
 
 type FilterKey = 'all' | 'unpaid' | 'overdue' | 'paid';
 
-const TYPE_CFG: Record<ManagerInvoiceType, { label: string; icon: string; color: string; bg: string }> = {
-  RENT:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  ELECTRICITY: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  WATER:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  SERVICE:     { label: 'Phí dịch vụ', icon: '🧾', color: '#0891B2', bg: '#CFFAFE' },
-  OTHER:       { label: 'Khoản khác', icon: '📄', color: '#059669', bg: '#ECFDF5' },
+const TYPE_CFG: Record<ManagerInvoiceType, { label: string; icon: IconName; color: string; bg: string }> = {
+  RENT:        { label: 'Tiền phòng', icon: 'home',     color: '#7C3AED', bg: '#F5F3FF' },
+  ELECTRICITY: { label: 'Tiền điện',  icon: 'electric', color: '#D97706', bg: '#FEF9C3' },
+  WATER:       { label: 'Tiền nước',  icon: 'water',    color: '#2563EB', bg: '#DBEAFE' },
+  SERVICE:     { label: 'Phí dịch vụ', icon: 'receipt', color: '#0891B2', bg: '#CFFAFE' },
+  OTHER:       { label: 'Khoản khác', icon: 'document', color: '#059669', bg: '#ECFDF5' },
 };
 
 const STATUS_CFG: Record<ManagerInvoiceStatus, { label: string; color: string; bg: string }> = {
@@ -90,13 +91,13 @@ const InvoiceDetailModal: React.FC<{
         <View style={ds.sheet}>
           <View style={[ds.head, { backgroundColor: tc.bg }]}>
             <View style={ds.headTop}>
-              <Text style={ds.headIcon}>{invoiceKind(invoice).icon}</Text>
+              <Icon name={invoiceKind(invoice).icon} size={26} color={tc.color} />
               <View style={{ flex: 1 }}>
                 <Text style={[ds.headTitle, { color: tc.color }]}>{invoiceKind(invoice).label}</Text>
                 <Text style={ds.headCode}>{invoice.code}</Text>
               </View>
               <TouchableOpacity onPress={onClose} hitSlop={10}>
-                <Text style={ds.close}>✕</Text>
+                <Icon name="close" size={18} color={Colors.textMuted} />
               </TouchableOpacity>
             </View>
             {/* Số tiền bị mask thì nói thẳng, đừng in "0đ" — đây là chỗ chữ to
@@ -129,11 +130,11 @@ const InvoiceDetailModal: React.FC<{
             {collectable && (
               <>
                 <TouchableOpacity style={ds.collectBtn} onPress={() => onCollect('CASH_COLLECT')}>
-                  <Text style={ds.collectBtnText}>💵  Khách trả tiền mặt</Text>
+                  <IconText icon="cash" style={ds.collectBtnText}>Khách trả tiền mặt</IconText>
                   <Text style={ds.collectBtnSub}>Bạn nhận tiền mặt rồi tự chuyển vào QR</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[ds.collectBtn, ds.collectBtnAlt]} onPress={() => onCollect('PROXY_PAY')}>
-                  <Text style={ds.collectBtnText}>👥  Có người trả hộ</Text>
+                  <IconText icon="users" style={ds.collectBtnText}>Có người trả hộ</IconText>
                   <Text style={ds.collectBtnSub}>Người trả hộ tự quét QR · phải ghi tên họ</Text>
                 </TouchableOpacity>
               </>
@@ -171,7 +172,7 @@ const InvoiceCard: React.FC<{ invoice: ManagerInvoice; onPress: () => void }> = 
   return (
     <TouchableOpacity style={cs.card} onPress={onPress} activeOpacity={0.7}>
       <View style={[cs.iconWrap, { backgroundColor: tc.bg }]}>
-        <Text style={cs.icon}>{kind.icon}</Text>
+        <Icon name={kind.icon} size={18} color={tc.color} />
       </View>
       <View style={cs.mid}>
         <Text style={cs.type} numberOfLines={1}>{kind.label}</Text>
@@ -307,7 +308,7 @@ export const TenantInvoicesScreen: React.FC = () => {
     <SafeAreaView style={ss.safe} edges={['top', 'left', 'right']}>
       <View style={ss.header}>
         <TouchableOpacity style={ss.backBtn} onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={ss.backBtnText}>‹</Text>
+          <Icon name="back" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={ss.headerTitle} numberOfLines={1}>{tenantName}</Text>
@@ -355,7 +356,7 @@ export const TenantInvoicesScreen: React.FC = () => {
         <View style={ss.state}><ActivityIndicator color={Colors.primary} /><Text style={ss.stateText}>Đang tải hoá đơn...</Text></View>
       ) : error ? (
         <View style={ss.state}>
-          <Text style={ss.stateEmoji}>⚠️</Text>
+          <Icon name="alert" size={34} color={Colors.warning} strokeWidth={1.5} />
           <Text style={ss.stateText}>{error}</Text>
           <TouchableOpacity style={ss.retry} onPress={() => load()}>
             <Text style={ss.retryText}>Thử lại</Text>
@@ -376,7 +377,7 @@ export const TenantInvoicesScreen: React.FC = () => {
         >
           {filtered.length === 0 ? (
             <View style={ss.state}>
-              <Text style={ss.stateEmoji}>🧾</Text>
+              <Icon name="receipt" size={34} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={ss.stateText}>
                 {invoices.length === 0
                   ? 'Khách này chưa có hoá đơn nào.'
@@ -427,7 +428,7 @@ const ss = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  backBtnText: { fontSize: 28, color: Colors.textPrimary, marginTop: -4 },
+
   headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
 
@@ -463,7 +464,7 @@ const ss = StyleSheet.create({
 
   list: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xl },
   state: { alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm },
-  stateEmoji: { fontSize: 34 },
+
   stateText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
   retry: {
     marginTop: Spacing.xs, backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
@@ -480,7 +481,7 @@ const cs = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
   iconWrap: { width: 40, height: 40, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center' },
-  icon: { fontSize: 18 },
+
   mid: { flex: 1 },
   type: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   meta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
@@ -501,10 +502,10 @@ const ds = StyleSheet.create({
   },
   head: { padding: Spacing.lg },
   headTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  headIcon: { fontSize: 26 },
+
   headTitle: { fontSize: 16, fontWeight: '900' },
   headCode: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  close: { fontSize: 18, color: Colors.textMuted, fontWeight: '700' },
+
   headAmount: { fontSize: 28, fontWeight: '900', marginTop: Spacing.md },
   /** Tiền nhà bị mask — chữ nhỏ và mờ hơn, để không đọc nhầm thành một con số. */
   headAmountHidden: { fontSize: 17, color: Colors.textMuted },

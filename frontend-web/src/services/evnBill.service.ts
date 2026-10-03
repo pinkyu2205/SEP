@@ -73,6 +73,12 @@ export interface EvnBill {
   readingDeadline?: string | null;
   /** Quá hạn mà chưa ghi đủ phòng. */
   overdue?: boolean;
+  /**
+   * Nhà nguyên căn kỳ đầu: phần kWh tính cho khách và phần công ty chịu (quãng trước
+   * ngày khách dọn vào). BE ghi lúc tự phát hành cho khách — `createFromWholeHouseBill`.
+   */
+  billedToTenantQuantity?: number | null;
+  companyBornQuantity?: number | null;
   createdBy?: string;
   createdAt?: string;
 }
@@ -107,10 +113,17 @@ export interface CreateEvnBillInput {
   ocrConfirmed?: boolean;
 }
 
-/** Kết quả OCR ảnh hoá đơn EVN (BE: OcrEvnBillResponse, endpoint đã có sẵn). */
+/**
+ * Kết quả OCR ảnh hoá đơn (BE: `OcrUtilityBillResponse`) — dùng chung cho điện lẫn nước.
+ *
+ * BE đổi `totalKwh` thành `totalQuantity` khi gộp hai loại; giữ cả hai tên để bản BE nào
+ * trả về cũng đọc được. Số BE tự dò theo nhãn, không thấy nhãn thì lấy đại số CUỐI CÙNG
+ * trong ảnh — nên chỉ dùng làm đường lui khi parser của app không đọc ra.
+ */
 export interface OcrEvnBillResponse {
   rawText?: string;
   numbers?: string[];
+  totalQuantity?: number;
   totalKwh?: number;
   totalAmount?: number;
   billingPeriod?: string;

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
 import { serverNow } from '@/utils/serverTime';
+import { Icon, type IconName } from '@/components/common/Icon';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -86,27 +87,27 @@ const durationLabel = ({ days, months }: Tenure): string => {
  * thích lấy mình ("Bạn đã ở đây 1 ngày"), số vẫn in đậm nên vẫn là thứ đập vào mắt
  * trước, mà không ai phải đoán.
  */
-const message = (t: Tenure): { emoji: string; prefix: string; value: string; suffix: string } => {
+const message = (t: Tenure): { icon: IconName; prefix: string; value: string; suffix: string } => {
   const dur = durationLabel(t);
 
   if (t.anniversary === 'year') {
-    return { emoji: '🎂', prefix: 'Hôm nay tròn ', value: `${t.months / 12} năm`, suffix: ' bạn ở đây. Cảm ơn bạn!' };
+    return { icon: 'cake', prefix: 'Hôm nay tròn ', value: `${t.months / 12} năm`, suffix: ' bạn ở đây. Cảm ơn bạn!' };
   }
   if (t.anniversary === 'month') {
-    return { emoji: '🎉', prefix: 'Hôm nay tròn ', value: `${t.months} tháng`, suffix: ' bạn ở đây' };
+    return { icon: 'party', prefix: 'Hôm nay tròn ', value: `${t.months} tháng`, suffix: ' bạn ở đây' };
   }
 
   const { days, months } = t;
-  const say = (emoji: string, suffix: string) => ({ emoji, prefix: 'Bạn đã ở đây ', value: dur, suffix });
+  const say = (icon: IconName, suffix: string) => ({ icon, prefix: 'Bạn đã ở đây ', value: dur, suffix });
 
-  if (days === 1)  return say('🎊', ' — chào mừng về nhà mới!');
-  if (days <= 7)   return say('🌱', ' — những ngày đầu tiên');
-  if (days <= 30)  return say('☕', ' — tuần đầu trôi qua êm đẹp');
-  if (months < 3)  return say('🏡', ' — nơi này đang thành quen thuộc');
-  if (months < 6)  return say('🌿', ' — cảm ơn bạn đã chọn ở lại');
-  if (months < 12) return say('⭐', ' — một chặng đường dài');
-  if (months < 24) return say('💎', ' — bạn là người nhà rồi');
-  return say('👑', ' — khách thuê thân thiết');
+  if (days === 1)  return say('key', ' — chào mừng về nhà mới!');
+  if (days <= 7)   return say('sprout', ' — những ngày đầu tiên');
+  if (days <= 30)  return say('coffee', ' — tuần đầu trôi qua êm đẹp');
+  if (months < 3)  return say('home', ' — nơi này đang thành quen thuộc');
+  if (months < 6)  return say('leaf', ' — cảm ơn bạn đã chọn ở lại');
+  if (months < 12) return say('star', ' — một chặng đường dài');
+  if (months < 24) return say('heart', ' — bạn là người nhà rồi');
+  return say('award', ' — khách thuê thân thiết');
 };
 
 /**
@@ -122,21 +123,21 @@ const message = (t: Tenure): { emoji: string; prefix: string; value: string; suf
  * hôm đó không rủ xin gia hạn nữa — mời một việc đã đóng cửa còn tệ hơn là im lặng.
  */
 const expiring = (daysLeft: number, hasCheckout: boolean) => {
-  const bold = (emoji: string, prefix: string, value: string, suffix: string) =>
-    ({ emoji, prefix, value, suffix });
+  const bold = (icon: IconName, prefix: string, value: string, suffix: string) =>
+    ({ icon, prefix, value, suffix });
 
   // Quá hạn mà vẫn còn thấy màn này = phiếu trả phòng chưa xong. Không gộp vào nhánh
   // dưới: `daysLeft = -5` mà nói "hôm nay là ngày cuối" thì sai hẳn ngày.
-  if (daysLeft < 0)   return bold('🔔', '', 'Hợp đồng đã hết hạn', '');
-  if (daysLeft === 0) return bold('🔔', '', 'Hôm nay', ' là ngày cuối hợp đồng');
-  if (daysLeft === 1) return bold('⏰', '', 'Ngày mai', ' là ngày cuối hợp đồng');
+  if (daysLeft < 0)   return bold('bell', '', 'Hợp đồng đã hết hạn', '');
+  if (daysLeft === 0) return bold('bell', '', 'Hôm nay', ' là ngày cuối hợp đồng');
+  if (daysLeft === 1) return bold('alarm', '', 'Ngày mai', ' là ngày cuối hợp đồng');
 
   // Đang có phiếu trả phòng thì đừng rủ gia hạn — khách đã chọn đường khác rồi.
   const nudge = hasCheckout
     ? ''
     : (daysLeft <= 7 ? ' — muốn ở tiếp thì xin gia hạn ngay' : ' — bạn có thể xin gia hạn');
 
-  return bold(daysLeft <= 7 ? '⏳' : '📋', 'Hợp đồng còn ', `${daysLeft} ngày`, nudge);
+  return bold(daysLeft <= 7 ? 'hourglass' : 'contract', 'Hợp đồng còn ', `${daysLeft} ngày`, nudge);
 };
 
 interface Props {
@@ -158,17 +159,18 @@ export const TenureCard: React.FC<Props> = ({ moveInDate, daysLeft, hasCheckout,
   // Không có ngày dọn vào MÀ cũng không sắp hết hạn thì chẳng có gì để nói.
   if (!tenure && !near) return null;
 
-  const { emoji, prefix, value, suffix } = near
+  const { icon, prefix, value, suffix } = near
     ? expiring(daysLeft as number, !!hasCheckout)
     : message(tenure as Tenure);
 
   const party = !near && tenure?.anniversary != null;
   const tone  = urgent ? s.rowUrgent : near ? s.rowWarn : party ? s.rowParty : null;
   const txt   = urgent ? s.textUrgent : near ? s.textWarn : party ? s.textParty : null;
+  const iconColor = urgent || party ? Brand.redDark : near ? '#B45309' : Brand.greenDark;
 
   return (
     <View style={[s.row, tone, style]}>
-      <Text style={s.emoji}>{emoji}</Text>
+      <Icon name={icon} size={17} color={iconColor} />
       <Text style={[s.text, txt]} numberOfLines={2}>
         {prefix}
         <Text style={[s.value, txt]}>{value}</Text>
@@ -197,7 +199,7 @@ const s = StyleSheet.create({
   rowWarn:   { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' },
   rowUrgent: { backgroundColor: Brand.redTint, borderColor: '#FBD5D5' },
 
-  emoji: { fontSize: 15 },
+
   text:  { flex: 1, fontSize: 12.5, color: Brand.greenDark, lineHeight: 17 },
   value: { fontWeight: '800', color: Colors.textPrimary },
   textParty:  { color: Brand.redDark },

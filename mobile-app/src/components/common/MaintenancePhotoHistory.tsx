@@ -5,13 +5,14 @@ import { formatDate, isVideoUrl } from '@/utils';
 import type { MaintenancePhotoHistoryDto } from '@/types';
 import { PhotoLightbox, type LightboxState } from './PhotoLightbox';
 import { VideoPreviewModal } from './VideoPreviewModal';
+import { Icon, IconText, type IconName } from './Icon';
 
-const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: string }[] = [
-  { type: 'BEFORE',         label: '📸 Hiện trạng ban đầu', color: Colors.warning },
-  { type: 'FAULT_EVIDENCE', label: '⚠️ Bằng chứng lỗi',      color: '#DC2626' },
-  { type: 'SELF_REPAIR',    label: '🛠 Tenant tự sửa',       color: '#F97316' },
-  { type: 'AFTER',          label: '🖼️ Sau sửa chữa',        color: Colors.success },
-  { type: 'INVOICE',        label: '🧾 Hoá đơn',             color: '#0369A1' },
+const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; icon: IconName; color: string }[] = [
+  { type: 'BEFORE',         label: 'Hiện trạng ban đầu', icon: 'camera',  color: Colors.warning },
+  { type: 'FAULT_EVIDENCE', label: 'Bằng chứng lỗi',     icon: 'warning', color: '#DC2626' },
+  { type: 'SELF_REPAIR',    label: 'Tenant tự sửa',      icon: 'hammer',  color: '#F97316' },
+  { type: 'AFTER',          label: 'Sau sửa chữa',       icon: 'image',   color: Colors.success },
+  { type: 'INVOICE',        label: 'Hoá đơn',            icon: 'receipt', color: '#0369A1' },
 ];
 
 /**
@@ -27,14 +28,14 @@ export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistor
 
   return (
     <View style={s.card}>
-      <Text style={s.title}>🗂️ Lịch sử ảnh (mọi vòng)</Text>
+      <Text style={s.title}>Lịch sử ảnh (mọi vòng)</Text>
       {GROUPS.map(g => {
         const items = sorted.filter(p => p.type === g.type);
         if (items.length === 0) return null;
         const uris = items.map(p => p.url);
         return (
           <View key={g.type} style={s.group}>
-            <Text style={[s.groupLabel, { color: g.color }]}>{g.label} ({items.length})</Text>
+            <IconText icon={g.icon} style={[s.groupLabel, { color: g.color }]}>{g.label} ({items.length})</IconText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {items.map((p, i) => {
                 const isVideo = isVideoUrl(p.url);
@@ -45,7 +46,7 @@ export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistor
                   >
                     {isVideo ? (
                       <View style={[s.thumb, s.videoThumb]}>
-                        <Text style={{ fontSize: 18 }}>🎬</Text>
+                        <Icon name="play" size={20} color={Colors.white} fill={Colors.white} />
                       </View>
                     ) : (
                       <Image source={{ uri: p.url }} style={s.thumb} />

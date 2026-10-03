@@ -10,6 +10,7 @@ import { BillingManagementScreen } from '@/screens/manager/BillingManagementScre
 import { MaintenanceManagerScreen } from '@/screens/manager/MaintenanceManagerScreen';
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
 import { Colors, BorderRadius, Shadow, Spacing } from '@/constants';
+import { Icon, IconName } from '@/components/common/Icon';
 
 const Tab = createBottomTabNavigator();
 
@@ -25,12 +26,12 @@ const HOME_ROUTE = 'ManagerHome';
  * NHIỀU nhà, "cần xử lý" là bao nhiêu thì phải chốt nghiệp vụ trước — số bịa còn tệ
  * hơn không có số. Cần thì dựng lại theo kiểu `useTenantTabBadges`.
  */
-const TAB_META: Record<string, { label: string; icon: string; badge?: number }> = {
-  ManagerHome: { label: 'Tổng quan', icon: '📊' },
-  BuildingList: { label: 'Tòa nhà', icon: '🏢' },
-  ManagerBilling: { label: 'Hóa đơn', icon: '🧾' },
-  ManagerMaintenance: { label: 'Bảo trì', icon: '🔧' },
-  ManagerProfile: { label: 'Tài khoản', icon: '👤' },
+const TAB_META: Record<string, { label: string; icon: IconName; badge?: number }> = {
+  ManagerHome: { label: 'Tổng quan', icon: 'dashboard' },
+  BuildingList: { label: 'Tòa nhà', icon: 'building' },
+  ManagerBilling: { label: 'Hóa đơn', icon: 'receipt' },
+  ManagerMaintenance: { label: 'Bảo trì', icon: 'wrench' },
+  ManagerProfile: { label: 'Tài khoản', icon: 'user' },
 };
 
 // New Architecture (newArchEnabled: true) đã bật LayoutAnimation sẵn — không cần
@@ -105,7 +106,7 @@ const AnimatedTabItem = memo(({
   testID,
 }: {
   label: string;
-  icon: string;
+  icon: IconName;
   focused: boolean;
   badge?: number;
   onPress: () => void;
@@ -152,7 +153,12 @@ const AnimatedTabItem = memo(({
         ]}
       >
         <View style={styles.iconWrap}>
-          <Text style={[styles.icon, focused ? styles.iconActive : styles.iconInactive]}>{icon}</Text>
+          <Icon
+            name={icon}
+            size={22}
+            color={focused ? Colors.primary : Colors.textMuted}
+            strokeWidth={focused ? 2.1 : 1.8}
+          />
           {badge && badge > 0 ? (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{badge > 9 ? '9+' : badge}</Text>
@@ -232,15 +238,7 @@ const styles = StyleSheet.create({
     minWidth: 26,
     alignItems: 'center',
   },
-  icon: {
-    fontSize: 20,
-  },
-  iconActive: {
-    opacity: 1,
-  },
-  iconInactive: {
-    opacity: 0.48,
-  },
+
   label: {
     marginTop: 2,
     fontSize: 10,

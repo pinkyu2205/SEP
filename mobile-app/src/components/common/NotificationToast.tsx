@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { toastBus, ToastNotice } from '@/store/toastBus';
 import { navigateFromNotification } from '@/navigation/navigationRef';
+import { Icon, IconText, type IconName } from './Icon';
 
 /**
  * Băng thông báo trượt từ trên xuống khi có thông báo mới (mount 1 lần ở App.tsx).
@@ -17,14 +18,14 @@ import { navigateFromNotification } from '@/navigation/navigationRef';
 const SHOW_MS = 6000;
 
 /** Icon theo loại thông báo để nhìn phát biết việc gì. */
-const iconOf = (type: string): string => {
+const iconOf = (type: string): IconName => {
   const t = (type || '').toUpperCase();
-  if (t.includes('CHECKOUT')) return '🚪';
-  if (t.includes('MAINTENANCE')) return '🔧';
-  if (t.includes('OVERDUE')) return '🚨';
-  if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT'].some(k => t.includes(k))) return '🧾';
-  if (t.includes('CONTRACT') || t.includes('ASSIGN') || t.includes('ONBOARD')) return '🤝';
-  return '🔔';
+  if (t.includes('CHECKOUT')) return 'door';
+  if (t.includes('MAINTENANCE')) return 'wrench';
+  if (t.includes('OVERDUE')) return 'alert';
+  if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT'].some(k => t.includes(k))) return 'receipt';
+  if (t.includes('CONTRACT') || t.includes('ASSIGN') || t.includes('ONBOARD')) return 'handshake';
+  return 'bell';
 };
 
 export const NotificationToast: React.FC = () => {
@@ -67,14 +68,14 @@ export const NotificationToast: React.FC = () => {
       pointerEvents="box-none"
     >
       <TouchableOpacity style={s.card} activeOpacity={0.9} onPress={open}>
-        <View style={s.iconWrap}><Text style={s.icon}>{iconOf(current.type)}</Text></View>
+        <View style={s.iconWrap}><Icon name={iconOf(current.type)} size={19} color={Colors.primary} /></View>
         <View style={s.body}>
           <Text style={s.title} numberOfLines={1}>{current.title}</Text>
           <Text style={s.text} numberOfLines={2}>{current.body}</Text>
-          <Text style={s.cta}>Chạm để xem →</Text>
+          <IconText icon="arrow-right" trailing gap={4} iconSize={13} style={s.cta}>Chạm để xem</IconText>
         </View>
         <TouchableOpacity style={s.closeBtn} onPress={() => hide()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Text style={s.closeText}>✕</Text>
+          <Icon name="close" size={16} color={Colors.textMuted} />
         </TouchableOpacity>
       </TouchableOpacity>
     </Animated.View>
@@ -97,11 +98,11 @@ const s = StyleSheet.create({
     width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  icon: { fontSize: 18 },
+
   body: { flex: 1 },
   title: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   text: { fontSize: 12.5, color: Colors.textSecondary, lineHeight: 18, marginTop: 2 },
   cta: { fontSize: 11.5, fontWeight: '700', color: Colors.primary, marginTop: 6 },
   closeBtn: { paddingHorizontal: 4, paddingTop: 2 },
-  closeText: { fontSize: 14, color: Colors.textMuted, fontWeight: '700' },
+
 });

@@ -7,13 +7,19 @@ import { MaintenanceListScreen } from '@/screens/tenant/MaintenanceListScreen';
 import { TenantContractScreen } from '@/screens/tenant/TenantContractScreen';
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
 import { Colors } from '@/constants';
+import { Icon, IconName } from '@/components/common/Icon';
 import { useTenantTabBadges } from '@/hooks/useTenantTabBadges';
 
 const Tab = createBottomTabNavigator();
 
-const TabIcon = ({ emoji, focused, badge }: { emoji: string; focused: boolean; badge?: number }) => (
+const TabIcon = ({ name, focused, badge }: { name: IconName; focused: boolean; badge?: number }) => (
   <View style={tabStyles.iconWrap}>
-    <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
+    <Icon
+      name={name}
+      size={22}
+      color={focused ? Colors.primary : Colors.textMuted}
+      strokeWidth={focused ? 2.1 : 1.8}
+    />
     {badge && badge > 0 ? (
       <View style={tabStyles.badge}>
         <Text style={tabStyles.badgeText}>{badge > 9 ? '9+' : badge}</Text>
@@ -57,7 +63,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={TenantHomeScreen}
         options={{
           tabBarLabel: 'Trang chủ',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
         }}
       />
       <Tab.Screen
@@ -65,7 +71,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={InvoiceListScreen}
         options={{
           tabBarLabel: 'Hóa đơn',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🧾" focused={focused} badge={badges.invoices} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="receipt" focused={focused} badge={badges.invoices} />,
         }}
       />
       <Tab.Screen
@@ -73,7 +79,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={MaintenanceListScreen}
         options={{
           tabBarLabel: 'Sửa chữa',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} badge={badges.maintenance} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="wrench" focused={focused} badge={badges.maintenance} />,
         }}
       />
       <Tab.Screen
@@ -81,7 +87,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={TenantContractScreen}
         options={{
           tabBarLabel: 'Hợp đồng',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="contract" focused={focused} />,
         }}
       />
       <Tab.Screen
@@ -89,7 +95,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={ProfileScreen}
         options={{
           tabBarLabel: 'Tài khoản',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="user" focused={focused} />,
         }}
       />
     </Tab.Navigator>

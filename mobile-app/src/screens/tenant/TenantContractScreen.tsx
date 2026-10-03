@@ -7,6 +7,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Contract, ContractStatus } from '@/types';
 import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '@/utils';
+import { Icon, IconText } from '@/components/common/Icon';
 import {
   realTenantSelfService, MyContractListItem, mapBeContractStatus,
 } from '@/services/tenant/selfService';
@@ -153,17 +154,17 @@ export const TenantContractScreen: React.FC = () => {
 
         {isActive && item.daysUntilExpiry !== undefined && item.daysUntilExpiry <= 60 && (
           <View style={styles.expiryWarning}>
-            <Text style={styles.expiryWarningText}>
-              ⚠️ Còn {item.daysUntilExpiry} ngày hết hạn hợp đồng
-            </Text>
+            <IconText icon="warning" style={styles.expiryWarningText}>
+              Còn {item.daysUntilExpiry} ngày hết hạn hợp đồng
+            </IconText>
           </View>
         )}
 
         {isActive && item.daysUntilExpiry !== undefined && item.daysUntilExpiry > 60 && (
           <View style={styles.expiryInfo}>
-            <Text style={styles.expiryInfoText}>
-              📅 Còn {item.daysUntilExpiry} ngày đến khi hết hạn
-            </Text>
+            <IconText icon="calendar" style={styles.expiryInfoText}>
+              Còn {item.daysUntilExpiry} ngày đến khi hết hạn
+            </IconText>
           </View>
         )}
 
@@ -184,7 +185,7 @@ export const TenantContractScreen: React.FC = () => {
 
   const EmptyState = () => (
     <View style={styles.empty}>
-      <Text style={styles.emptyEmoji}>📋</Text>
+      <Icon name="contract" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
       <Text style={styles.emptyTitle}>Không có hợp đồng</Text>
       <Text style={styles.emptyDesc}>Bạn chưa có hợp đồng nào với trạng thái này.</Text>
     </View>
@@ -201,7 +202,7 @@ export const TenantContractScreen: React.FC = () => {
       {activeContract && (
         <View style={styles.summaryBanner}>
           <View style={styles.summaryLeft}>
-            <Text style={styles.summaryEmoji}>✅</Text>
+            <Icon name="success" size={28} color={Colors.success} />
             <View>
               <Text style={styles.summaryTitle}>Đang thuê · {activeContract.scopeLabel}</Text>
               <Text style={styles.summaryDesc}>{activeContract.propertyName}</Text>
@@ -269,7 +270,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary + '30',
   },
   summaryLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  summaryEmoji: { fontSize: 28 },
+
   summaryTitle: { fontSize: 15, fontWeight: '700', color: Colors.primary },
   summaryDesc: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   summaryRight: { alignItems: 'center' },
@@ -340,7 +341,7 @@ const styles = StyleSheet.create({
   actionBtnPrimaryText: { fontSize: 13, fontWeight: '700', color: Colors.white },
 
   empty: { paddingTop: 60, alignItems: 'center' },
-  emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },
+  emptyIcon: { marginBottom: Spacing.base },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', paddingHorizontal: Spacing.xl },
 });

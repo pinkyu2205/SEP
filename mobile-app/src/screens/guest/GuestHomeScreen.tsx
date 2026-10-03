@@ -14,6 +14,7 @@ import { PropertyListing } from '@/types';
 import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 import { formatCurrency } from '@/utils/helpers';
 import { SearchOverlay } from './GuestSearchOverlay';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -57,7 +58,7 @@ const CARD_GAP = Spacing.md;
 const PROPERTY_TYPES = [
   {
     id: 'apartment',
-    icon: '🏢',
+    icon: 'building' as const,
     label: 'Theo phòng',
     sub: 'Phòng trọ, sinh viên',
     tint: Brand.redTint,
@@ -66,7 +67,7 @@ const PROPERTY_TYPES = [
   },
   {
     id: 'whole_house',
-    icon: '🏡',
+    icon: 'home' as const,
     label: 'Nguyên căn',
     sub: 'Gia đình, nhóm bạn',
     tint: Brand.greenTint,
@@ -136,7 +137,7 @@ const HomeCard: React.FC<{ property: PropertyListing; onPress: () => void; index
             <Image source={{ uri: property.photos[0] }} style={card.img} resizeMode="cover" />
           ) : (
             <View style={card.imgFallback}>
-              <Text style={card.imgFallbackIcon}>{isWH ? '🏡' : '🏢'}</Text>
+              <Icon name={isWH ? 'home' : 'building'} size={34} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={card.imgFallbackTxt}>Chưa có ảnh</Text>
             </View>
           )}
@@ -183,7 +184,7 @@ const card = StyleSheet.create({
   imgWrap:     { width: '100%', height: 168, backgroundColor: '#E8EBF2' },
   img:         { width: '100%', height: '100%' },
   imgFallback: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  imgFallbackIcon: { fontSize: 34, opacity: 0.5 },
+
   imgFallbackTxt:  { fontSize: 11, color: Colors.textMuted, fontWeight: '600' },
 
   badgeRow: {
@@ -301,7 +302,7 @@ export const GuestHomeScreen: React.FC = () => {
                   {/* Gọi điện thu về nút tròn: nó là hành động phụ ở đây, và số hotline
                       vẫn hiện đầy đủ ở khối liên hệ cuối trang. */}
                   <TouchableOpacity style={s.callBtn} onPress={callHotline} activeOpacity={0.8}>
-                    <Text style={s.callIcon}>📞</Text>
+                    <Icon name="phone" size={17} color={Colors.white} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={s.loginBtn}
@@ -323,7 +324,7 @@ export const GuestHomeScreen: React.FC = () => {
               </View>
 
               <TouchableOpacity style={s.search} onPress={() => setShowSearch(true)} activeOpacity={0.9}>
-                <Text style={s.searchIcon}>🔍</Text>
+                <Icon name="search" size={17} color={Colors.textMuted} />
                 <Text style={s.searchPlaceholder}>Tìm khu vực, tên nhà, địa chỉ…</Text>
                 <View style={s.searchBtn}><Text style={s.searchBtnTxt}>Tìm</Text></View>
               </TouchableOpacity>
@@ -365,7 +366,7 @@ export const GuestHomeScreen: React.FC = () => {
                 onPress={() => navigation.navigate('SearchResult', { filters: { propertyType: t.propertyType } })}
               >
                 <View style={[s.typeIconBox, { backgroundColor: t.tint }]}>
-                  <Text style={s.typeIcon}>{t.icon}</Text>
+                  <Icon name={t.icon} size={22} color={t.accent} />
                 </View>
                 <Text style={s.typeLabel}>{t.label}</Text>
                 <Text style={s.typeSub} numberOfLines={1}>{t.sub}</Text>
@@ -385,7 +386,7 @@ export const GuestHomeScreen: React.FC = () => {
               <Text style={s.sectionSub}>Những nơi đáng xem nhất lúc này</Text>
             </View>
             <TouchableOpacity onPress={() => navigation.navigate('Search')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={s.seeAll}>Tất cả →</Text>
+              <IconText icon="chevron-right" trailing gap={2} style={s.seeAll}>Tất cả</IconText>
             </TouchableOpacity>
           </View>
 
@@ -410,7 +411,7 @@ export const GuestHomeScreen: React.FC = () => {
             </ScrollView>
           ) : displayCards.length === 0 ? (
             <View style={s.empty}>
-              <Text style={s.emptyEmoji}>🔍</Text>
+              <Icon name="search" size={34} color={Colors.textMuted} style={s.emptyIcon} />
               <Text style={s.emptyTitle}>Chưa có bất động sản nào</Text>
               <Text style={s.emptyHint}>Kéo xuống để tải lại, hoặc gọi hotline để được tư vấn.</Text>
             </View>
@@ -445,7 +446,7 @@ export const GuestHomeScreen: React.FC = () => {
                 Hoàng Bình Land sẽ tìm giúp bạn.
               </Text>
               <TouchableOpacity style={s.ctaBtn} onPress={callHotline} activeOpacity={0.85}>
-                <Text style={s.ctaBtnIcon}>📞</Text>
+                <Icon name="phone" size={17} color={Colors.white} />
                 <Text style={s.ctaBtnTxt}>Gọi {HOTLINE_DISPLAY}</Text>
               </TouchableOpacity>
             </View>
@@ -510,7 +511,7 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center', justifyContent: 'center',
   },
-  callIcon: { fontSize: 16 },
+
   loginBtn: {
     backgroundColor: Colors.white,
     paddingHorizontal: Spacing.base, paddingVertical: 9,
@@ -529,7 +530,7 @@ const s = StyleSheet.create({
     paddingLeft: Spacing.base, paddingRight: 5, paddingVertical: 5,
     ...Shadow.lg,
   },
-  searchIcon:        { fontSize: 14 },
+
   searchPlaceholder: { flex: 1, fontSize: 13.5, color: Colors.textMuted },
   searchBtn: {
     backgroundColor: Brand.red,
@@ -559,7 +560,7 @@ const s = StyleSheet.create({
     width: 44, height: 44, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
   },
-  typeIcon:  { fontSize: 22 },
+
   typeLabel: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.2 },
   typeSub:   { fontSize: 11.5, color: Colors.textSecondary, marginTop: 2 },
   typeCount: { fontSize: 11.5, fontWeight: '800', marginTop: Spacing.sm },
@@ -587,7 +588,7 @@ const s = StyleSheet.create({
   skeleton: { width: CARD_W, height: 272, borderRadius: 22, backgroundColor: '#E8EBF2' },
 
   empty:      { alignItems: 'center', paddingVertical: Spacing['3xl'], paddingHorizontal: Spacing.xl },
-  emptyEmoji: { fontSize: 34, marginBottom: Spacing.sm },
+  emptyIcon:  { marginBottom: Spacing.sm },
   emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   emptyHint:  { fontSize: 12.5, color: Colors.textMuted, marginTop: 4, textAlign: 'center', lineHeight: 18 },
 
@@ -604,7 +605,7 @@ const s = StyleSheet.create({
     backgroundColor: Brand.green, borderRadius: 14,
     paddingVertical: Spacing.md + 1, marginTop: Spacing.lg,
   },
-  ctaBtnIcon: { fontSize: 16 },
+
   ctaBtnTxt:  { color: Colors.white, fontSize: 15.5, fontWeight: '800', letterSpacing: 0.1 },
 
   footerLogin:     { alignItems: 'center', paddingVertical: Spacing.lg },

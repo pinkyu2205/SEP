@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { BorderRadius, Shadow, Spacing } from '@/constants';
 import { City, District } from '@/types';
+import { Icon } from './Icon';
 
 interface DistrictCardProps {
   district: City | District;
@@ -32,7 +33,7 @@ export const DistrictCard: React.FC<DistrictCardProps> = ({
       style={[styles.container, { backgroundColor: p.bg }]}
     >
       <View style={[styles.iconBox, { backgroundColor: p.iconBg }]}>
-        <Text style={styles.icon}>📍</Text>
+        <Icon name="location" size={18} color={p.text} />
       </View>
       <View style={styles.content}>
         <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>
@@ -42,7 +43,7 @@ export const DistrictCard: React.FC<DistrictCardProps> = ({
           {district.availableRooms} căn hộ trống
         </Text>
       </View>
-      <Text style={[styles.arrow, { color: p.sub }]}>›</Text>
+      <Icon name="chevron-right" size={18} color={p.sub} style={styles.arrow} />
     </TouchableOpacity>
   );
 };
@@ -65,9 +66,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: Spacing.sm,
   },
-  icon: {
-    fontSize: 18,
-  },
+
   content: {
     flex: 1,
   },
@@ -81,9 +80,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   arrow: {
-    fontSize: 22,
-    fontWeight: '300',
     marginLeft: 2,
-    lineHeight: 26,
   },
 });

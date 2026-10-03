@@ -41,7 +41,58 @@ export interface ReadingMark {
   /** Kỳ (`yyyy-MM`) hoặc ngày ISO — tuỳ nguồn. Rỗng khi máy chủ không kèm mốc thời gian. */
   at?: string;
   imageUrl?: string;
+  /**
+   * Số này máy chủ lấy từ đâu (chỉ có ở `prevClose`):
+   *  • `reading` — bản ghi chỉ số có kỳ hẳn hoi;
+   *  • `invoice` — chỉ số MỚI của hoá đơn gần nhất (máy chủ lui về đây khi chưa có bản
+   *    ghi nào, và trả `period` rỗng — đó chính là dấu hiệu để phân biệt).
+   */
+  source?: 'reading' | 'invoice';
 }
+
+/**
+ * Hoá đơn tổng gần nhất TRƯỚC kỳ đang làm — "kỳ trước đã tính bao nhiêu".
+ *
+ * Admin mở một căn ra là muốn thấy ngay lần trước tính bao nhiêu để so với tờ giấy đang
+ * cầm: tháng trước 202 kWh mà tháng này đọc ra 2.020 là biết ngay đọc dư một số 0.
+ */
+export interface LastBill {
+  billingPeriod: string;
+  month: number;
+  year: number;
+  totalQuantity: number;
+  totalAmount: number;
+  unitPrice?: number;
+}
+
+type BillLike = {
+  status?: string;
+  month: number;
+  year: number;
+  billingPeriod?: string;
+  totalAmount: number;
+  unitPrice?: number;
+  totalQuantity?: number;
+  totalKwh?: number;
+};
+
+/** Chọn hoá đơn tổng gần nhất trước kỳ `month/year` (bỏ bản đã thu hồi). */
+export const pickLastBill = (bills: BillLike[], month: number, year: number): LastBill | null => {
+  const thisIdx = monthIndex(year, month);
+  const prior = bills
+    .filter(b => b.status !== 'REVOKED' && monthIndex(b.year, b.month) < thisIdx)
+    .sort((a, b) => monthIndex(b.year, b.month) - monthIndex(a.year, a.month));
+  const b = prior[0];
+  if (!b) return null;
+  return {
+    billingPeriod: b.billingPeriod ?? `${b.month}/${b.year}`,
+    month: b.month,
+    year: b.year,
+    totalQuantity: Number(b.totalQuantity ?? b.totalKwh ?? 0),
+    totalAmount: Number(b.totalAmount ?? 0),
+    unitPrice: b.unitPrice,
+  };
+};
 
 export interface UtilityCycle {
   /** Kỳ ĐẦU TIÊN khách đang thuê phải trả — chưa có hoá đơn nào sau ngày đón khách. */
@@ -55,17 +106,19 @@ export interface UtilityCycle {
   handover: ReadingMark | null;
   /** Ngày khách bắt đầu thuê (ISO) — để giải thích vì sao coi đây là kỳ đầu. */
   moveInAt?: string;
+  /** Hoá đơn tổng gần nhất trước kỳ này, của bất kỳ khách nào — xem `LastBill`. */
+  lastBill?: LastBill | null;
   /** Không tra được (nhà chưa có khách, hoặc mọi lệnh gọi đều hỏng). */
   unknown?: boolean;
 }
 
-const listBills = (type: UtilityApiType, propertyId: number) =>
+const listBills = (type: UtilityApiType, propertyId: number): Promise<BillLike[]> =>
   type === 'ELECTRIC'
     ? evnBillService.list({ propertyId })
     : waterBillService.list({ propertyId });
 
 /** `yyyy-MM` → số thứ tự tháng, để so hai kỳ mà không phải dựng Date. */
-const monthIndex = (year: number, month: number) => year * 12 + month;
+function monthIndex(year: number, month: number) { return year * 12 + month; }
 
 /**
  * Hợp đồng đang hiệu lực của CẢ CĂN (không gắn phòng).
@@ -100,8 +153,9 @@ export const loadUtilityCycle = async (
     meterReadingService.latestForProperty(propertyId, type),
   ]);
 
+  const lastBill = pickLastBill(bills, month, year);
   const contract = activeWholeHouseContract(contracts);
-  if (!contract) return { firstPeriod: false, prevClose: null, handover: null, unknown: true };
+  if (!contract) return { firstPeriod: false, prevClose: null, handover: null, lastBill, unknown: true };
 
   const handoverValue = type === 'ELECTRIC'
     ? contract.initialElectricReading
@@ -135,9 +189,15 @@ export const loadUtilityCycle = async (
     firstPeriod,
     prevClose: firstPeriod || !latest || !Number.isFinite(Number(latest.reading))
       ? null
-      : { reading: Math.round(Number(latest.reading)), at: latest.period || latest.recordedAt, imageUrl: latest.imageUrl },
+      : {
+          reading: Math.round(Number(latest.reading)),
+          at: latest.period || latest.recordedAt,
+          imageUrl: latest.imageUrl,
+          source: latest.period || latest.recordedAt ? 'reading' : 'invoice',
+        },
     handover,
     moveInAt: contract.startDate,
+    lastBill,
   };
 };
 

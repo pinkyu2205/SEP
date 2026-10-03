@@ -1,11 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
+import { Icon, type IconName } from './Icon';
 
 export interface FilterChipOption {
   id: string;
   label: string;
-  icon?: string;
+  icon?: IconName;
 }
 
 interface FilterChipsProps {
@@ -37,7 +38,14 @@ export const FilterChips: React.FC<FilterChipsProps> = ({
           onPress={() => handlePress(opt.id)}
           style={[styles.chip, isSelected && styles.chipSelected]}
         >
-          {opt.icon && <Text style={styles.icon}>{opt.icon}</Text>}
+          {opt.icon && (
+            <Icon
+              name={opt.icon}
+              size={15}
+              color={isSelected ? Colors.primaryDark : Colors.textSecondary}
+              style={styles.icon}
+            />
+          )}
           <Text style={[styles.label, isSelected && styles.labelSelected]}>
             {opt.label}
           </Text>
@@ -86,7 +94,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   icon: {
-    fontSize: 14,
     marginRight: 6,
   },
   label: {

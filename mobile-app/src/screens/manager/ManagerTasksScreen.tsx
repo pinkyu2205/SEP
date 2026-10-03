@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { useManagerTasks, type ManagerTaskItem, type TaskUrgency } from '@/hooks/useManagerTasks';
+import { Icon } from '@/components/common/Icon';
 
 /**
  * VIỆC CỦA TÔI — toàn bộ việc manager phải làm, chia 3 mức (24/09/2026).
@@ -40,7 +41,7 @@ export const ManagerTasksScreen: React.FC = () => {
       activeOpacity={0.7}
     >
       <View style={[s.iconWrap, { backgroundColor: t.color + '18' }]}>
-        <Text style={s.icon}>{t.icon}</Text>
+        <Icon name={t.icon} size={20} color={t.color} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={s.label}>{t.label}</Text>
@@ -49,7 +50,7 @@ export const ManagerTasksScreen: React.FC = () => {
       <View style={[s.count, { backgroundColor: t.color }]}>
         <Text style={s.countText}>{t.count}</Text>
       </View>
-      <Text style={s.chevron}>›</Text>
+      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
   );
 
@@ -57,7 +58,7 @@ export const ManagerTasksScreen: React.FC = () => {
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.back} accessibilityLabel="Quay lại">
-          <Text style={s.backText}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Việc của tôi</Text>
@@ -71,7 +72,7 @@ export const ManagerTasksScreen: React.FC = () => {
         <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
           {items.length === 0 && (
             <View style={s.clear}>
-              <Text style={{ fontSize: 40 }}>✅</Text>
+              <Icon name="success" size={44} color={Colors.success} />
               <Text style={s.clearText}>Mọi thứ ổn định — không có việc nào cần làm.</Text>
             </View>
           )}
@@ -106,7 +107,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   back: { padding: Spacing.sm },
-  backText: { fontSize: 24, lineHeight: 28, color: Colors.primary, fontWeight: '600' },
+
   title: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
   sub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   body: { padding: Spacing.base, paddingBottom: 100 },
@@ -123,10 +124,10 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.divider },
   iconWrap: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  icon: { fontSize: 18 },
+
   label: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   hint: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   count: { minWidth: 26, height: 26, borderRadius: 13, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
   countText: { color: Colors.white, fontSize: 12, fontWeight: '800' },
-  chevron: { fontSize: 18, color: Colors.textMuted },
+
 });
