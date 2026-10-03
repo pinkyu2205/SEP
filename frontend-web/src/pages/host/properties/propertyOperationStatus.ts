@@ -1,10 +1,10 @@
 /**
- * TÌNH TRẠNG KHAI THÁC & THU TIỀN CỦA TỪNG CĂN — cho màn "Bất động sản" của Host.
+ * TÌNH TRẠNG KHAI THÁC & THU TIỀN CỦA TỪNG CĂN — cho màn "Bất động sản" của Owner.
  *
  * ─── Vì sao cần ──────────────────────────────────────────────────────────────
  * Trước 30/08/2026 màn này chỉ trả lời được "nhà có tồn tại và đã duyệt giá chưa".
  * Badge trên card là `PropertyStatus` — VÒNG ĐỜI HỒ SƠ nhà, không phải trạng thái
- * cho thuê. Nên 51 căn đều hiện "Hoạt động" giống hệt nhau: host không phân biệt
+ * cho thuê. Nên 51 căn đều hiện "Hoạt động" giống hệt nhau: owner không phân biệt
  * được căn đang có khách với căn để không, và hoàn toàn không thấy tháng này khách
  * đã trả tiền chưa.
  *
@@ -41,9 +41,9 @@ import { normalizeVi } from '@/utils/helpers';
  * Trạng thái khai thác — trả lời "căn này đang ra tiền chưa".
  *
  * Tách `SETUP` khỏi `VACANT` là có chủ đích: cả hai đều "không có khách" nhưng việc
- * host cần làm khác hẳn nhau. `VACANT` = giục quản lý đi tìm khách. `SETUP` = phòng
+ * owner cần làm khác hẳn nhau. `VACANT` = giục quản lý đi tìm khách. `SETUP` = phòng
  * chưa tạo hoặc còn kẹt trạng thái, tìm được khách cũng không xếp vào đâu được.
- * Gộp làm một là đẩy host đi làm nhầm việc.
+ * Gộp làm một là đẩy owner đi làm nhầm việc.
  */
 export type RentalState = 'RENTED' | 'PARTIAL' | 'INCOMING' | 'VACANT' | 'SETUP' | 'UNKNOWN';
 
@@ -152,7 +152,7 @@ export interface PropertyOperationStatus {
   rental: RentalState;
   bills: BillSummary;
   billState: BillState;
-  /** Nguyên căn đang có khách: hạn hợp đồng, để host thấy khi nào phải tìm khách mới. */
+  /** Nguyên căn đang có khách: hạn hợp đồng, để owner thấy khi nào phải tìm khách mới. */
   contractEndDate?: string;
   tenantName?: string;
 
@@ -160,7 +160,7 @@ export interface PropertyOperationStatus {
    * TIỀN THUÊ THẬT — tổng `rentAmount` của mọi hợp đồng ACTIVE của căn này.
    *
    * ─── Vì sao không đọc `appliedPrice` của nhà ────────────────────────────────
-   * Mô hình giá của BE có hai số: `listedPrice` (giá Host duyệt — GIÁ CHÀO) và
+   * Mô hình giá của BE có hai số: `listedPrice` (giá Owner duyệt — GIÁ CHÀO) và
    * `appliedPrice` (giá hợp đồng đang chạy). Nhưng `appliedPrice` chỉ có ý nghĩa với
    * nhà NGUYÊN CĂN; nhà chia phòng thì giá nằm ở từng phòng, mỗi phòng một khách một
    * giá, không có con số nào ở cấp toà nhà nói được "căn này đang thu bao nhiêu".
@@ -237,7 +237,7 @@ export const useHostPropertyStatus = (
         return;
       }
 
-      // Rút gọn: BE host bắt buộc đúng 1 kỳ và không trả propertyId.
+      // Rút gọn: BE owner bắt buộc đúng 1 kỳ và không trả propertyId.
       const page = await hostService.getInvoices({ month: period, size: 500 }).catch(() => null);
       if (cancelled) return;
       if (!page) {
@@ -249,7 +249,7 @@ export const useHostPropertyStatus = (
         const key = normalizeVi(inv.propertyName ?? '');
         if (!key) continue;
         const acc = byName.get(key) ?? { ...EMPTY_BILLS };
-        // BE host trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
+        // BE owner trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
         addInvoice(acc, inv.status === 'UNPAID' ? 'PENDING' : inv.status, inv.amount);
         byName.set(key, acc);
       }
@@ -352,7 +352,7 @@ export interface PropertyBillBreakdown {
   house: BillSummary;
   /** Tách theo LOẠI khoản thu — "2/3 đã thu" không nói được thiếu tiền điện hay tiền nhà. */
   byType: Map<AdminInvoiceType, BillSummary>;
-  /** Từng hoá đơn một, để host mở ra xem đích xác đang chờ khoản nào. */
+  /** Từng hoá đơn một, để owner mở ra xem đích xác đang chờ khoản nào. */
   lines: BillLine[];
   total: BillSummary;
 }
@@ -360,7 +360,7 @@ export interface PropertyBillBreakdown {
 /**
  * Một hoá đơn cụ thể trong kỳ.
  *
- * Có danh sách này thì host trả lời được câu "thiếu cái gì" chứ không chỉ "thiếu mấy
+ * Có danh sách này thì owner trả lời được câu "thiếu cái gì" chứ không chỉ "thiếu mấy
  * cái" — hai hoá đơn cùng số lượng nhưng một cái là tiền nhà 5 triệu, một cái là tiền
  * nước 200 nghìn thì mức độ phải đi đòi khác hẳn nhau.
  */
@@ -374,7 +374,7 @@ export interface BillLine {
   status: string;
   dueDate?: string;
   /**
-   * `HD-ONBOARD-*` — vỏ bọc gộp cọc + tiền nhà kỳ đầu. VẪN liệt kê để host không
+   * `HD-ONBOARD-*` — vỏ bọc gộp cọc + tiền nhà kỳ đầu. VẪN liệt kê để owner không
    * thấy hụt một dòng so với sổ hoá đơn, nhưng KHÔNG cộng vào tổng (xem `addInvoice`).
    */
   envelope?: boolean;
@@ -455,7 +455,7 @@ const EMPTY_BREAKDOWN: PropertyBillBreakdown = {
 /**
  * Hoá đơn của một căn trong một kỳ.
  *
- * `propertyName` chỉ dùng ở chế độ rút gọn — endpoint `/host/invoices` không trả
+ * `propertyName` chỉ dùng ở chế độ rút gọn — endpoint `/owner/invoices` không trả
  * `propertyId` nên phải khớp bằng tên.
  */
 export const loadPropertyBills = async (
@@ -501,11 +501,11 @@ export const loadPropertyBills = async (
   const wanted = normalizeVi(propertyName);
   for (const inv of page.content ?? []) {
     if (normalizeVi(inv.propertyName ?? '') !== wanted) continue;
-    // BE host trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
+    // BE owner trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
     const status = inv.status === 'UNPAID' ? 'PENDING' : inv.status;
     const key = normalizeRoomNumber(inv.roomCode);
     addInvoice(key ? bump(byRoom, key) : house, status, inv.amount);
-    // `/host/invoices` dựng từ hợp đồng ACTIVE nên mọi dòng đều là tiền nhà —
+    // `/owner/invoices` dựng từ hợp đồng ACTIVE nên mọi dòng đều là tiền nhà —
     // endpoint này không có trường `type` để đọc.
     addInvoice(bumpType(byType, 'RENT'), status, inv.amount);
     addInvoice(total, status, inv.amount);
@@ -524,7 +524,7 @@ const bumpType = (map: Map<AdminInvoiceType, BillSummary>, t: AdminInvoiceType) 
   return cur;
 };
 
-/** Chưa thu lên trước (host cần đòi), rồi theo thứ tự loại cố định cho dễ quét mắt. */
+/** Chưa thu lên trước (owner cần đòi), rồi theo thứ tự loại cố định cho dễ quét mắt. */
 const sortLines = (lines: BillLine[]): BillLine[] =>
   [...lines].sort((a, b) => {
     const rank = (l: BillLine) => (l.status === 'OVERDUE' ? 0 : l.status === 'PAID' ? 2 : 1);

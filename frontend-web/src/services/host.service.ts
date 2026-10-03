@@ -3,7 +3,7 @@ import type { Page } from '@/types/api.types';
 import type { Expense, ExpenseCategory } from '@/types/expense';
 
 // =============================================================================
-// Host Portal service — nối API BE (/api/v1/host).
+// Owner Portal service — nối API BE (/api/v1/host).
 // Mỗi hàm trả về Promise<dữ liệu>; api interceptor đã bóc `response.data`.
 // =============================================================================
 
@@ -83,7 +83,7 @@ export interface DepositItem {
   refundedAt?: string;
   /**
    * Tài khoản khách yêu cầu hoàn cọc về (BE tách khỏi free-text `note` — 20/08/2026).
-   * Hợp đồng cũ không có, phần này để trống và host vẫn đọc ghi chú như trước.
+   * Hợp đồng cũ không có, phần này để trống và owner vẫn đọc ghi chú như trước.
    */
   refundBankName?: string;
   refundBankAccount?: string;
@@ -94,8 +94,8 @@ export interface DepositItem {
    * Ghi chú của phiếu trả phòng — phương án DỰ PHÒNG cho phiếu tạo trước 20/08/2026,
    * khi TK hoàn cọc còn nằm lẫn trong free-text vì BE chưa có field riêng.
    *
-   * Chỉ hiện nguyên văn cho host đọc, KHÔNG parse ngược: bóc chuỗi tự do rồi bày ra như
-   * số tài khoản đã xác thực thì nguy hiểm hơn là để host tự đọc.
+   * Chỉ hiện nguyên văn cho owner đọc, KHÔNG parse ngược: bóc chuỗi tự do rồi bày ra như
+   * số tài khoản đã xác thực thì nguy hiểm hơn là để owner tự đọc.
    */
   checkoutNote?: string;
   /**
@@ -117,7 +117,7 @@ export interface DepositItem {
 export interface DepositsResponse { totalHeld: number; items: DepositItem[]; }
 
 /**
- * Master lease (Host thuê lại nhà của chủ nhà gốc) — `GET /host/master-leases`.
+ * Master lease (Owner thuê lại nhà của chủ nhà gốc) — `GET /host/master-leases`.
  *
  * ⚠️ BE đã BỎ 4 field `ownerPhone` / `deposit` / `paymentDay` / `escalationPct` (19/08/2026):
  * chúng từng được hard-code 0/1/null chứ không đọc từ DB, vì entity `InboundContract` không
@@ -170,7 +170,7 @@ export interface HostContractDto {
   rentAmount: number; deposit?: number;
   moveInDate?: string; startDate: string; endDate?: string;
   status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED' | 'DRAFT';
-  // Trạng thái duyệt giá (Case 2 — manager gửi Host duyệt). Optional: đã đề nghị BE
+  // Trạng thái duyệt giá (Case 2 — manager gửi Owner duyệt). Optional: đã đề nghị BE
   // expose trong API-ProcessGaps-BE-TODO.md; chưa có thì FE fallback theo status PENDING.
   priceApprovalStatus?: 'PENDING_PRICE_APPROVAL' | 'APPROVED_AWAITING_DEPOSIT' | 'PRICE_REJECTED';
   priceRejectReason?: string;
@@ -213,7 +213,7 @@ export const hostService = {
     api.get(`${FINANCE}/deposits`, { params: status ? { status } : {} }),
 
   /**
-   * Đánh dấu ĐÃ HOÀN CỌC cho khách — host là người chuyển tiền từ 18/08/2026.
+   * Đánh dấu ĐÃ HOÀN CỌC cho khách — owner là người chuyển tiền từ 18/08/2026.
    *
    * ⚠️ BE CHƯA CÓ ENDPOINT NÀY. Từ 18/08/2026 app quản lý bỏ bước "Ghi nhận hoàn cọc"
    * (form đó buộc phải hiện tiền cọc — thứ manager không được biết, xem
@@ -221,8 +221,8 @@ export const hostService = {
    * `POST /api/v1/checkout-requests/{id}/refund` nữa và cọc nằm mãi ở "Đang giữ".
    *
    * Không tái dùng được endpoint cũ vì nó nhận **checkoutRequestId**, mà sổ cọc chỉ có
-   * `contractId` — host cũng không có endpoint nào liệt kê checkout-request để tra ra id
-   * (và endpoint kia là `hasAnyRole('MANAGER','ADMIN')` nên host gọi cũng 403).
+   * `contractId` — owner cũng không có endpoint nào liệt kê checkout-request để tra ra id
+   * (và endpoint kia là `hasAnyRole('MANAGER','ADMIN')` nên owner gọi cũng 403).
    *
    * Vì vậy gọi theo endpoint ĐỀ NGHỊ trong
    * `BE-BUG-checkout-disputed-khong-sua-duoc-bien-ban-2026-08-18.md` phần 2. Chừng nào
@@ -279,7 +279,7 @@ export const hostService = {
   getPropertyPerformance: (month: string): Promise<PropertyPerformanceRow[]> =>
     api.get(`${REPORTS}/property-performance`, { params: { month } }),
 
-  // Contracts (host duyệt HĐ tenant)
+  // Contracts (owner duyệt HĐ tenant)
   listContracts: (params: { propertyId?: number; status?: string; page?: number; size?: number } = {}): Promise<Page<HostContractDto>> =>
     api.get(CONTRACTS, { params }),
 
@@ -339,7 +339,7 @@ export const hostService = {
   /**
    * Số thông báo chưa đọc (cho badge sidebar/header).
    * skipErrorToast: badge là thông tin phụ chạy nền — BE lỗi thì giữ số cũ,
-   * không bắn toast đỏ che màn hình (xem docs/BE-HANDOFF-host-notifications-500).
+   * không bắn toast đỏ che màn hình (xem docs/BE-HANDOFF-owner-notifications-500).
    */
   getUnreadCount: async (): Promise<number> => {
     const page = await api.get<unknown, Page<HostNotificationDto>>(NOTIFICATIONS, {

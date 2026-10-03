@@ -23,7 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
   UNDER_RENOVATION: 'đang cải tạo',
   PENDING_EQUIPMENT_INSTALLATION: 'chờ lắp thiết bị',
   RENOVATION_COMPLETED: 'đã cải tạo xong',
-  PENDING_HOST_REVIEW: 'đang chờ Host duyệt giá',
+  PENDING_HOST_REVIEW: 'đang chờ Owner duyệt giá',
   PENDING_OPERATION_MANAGER: 'chờ gán quản lý',
   ACTIVE: 'đang kinh doanh',
   RENTED: 'đã cho thuê',
@@ -57,7 +57,7 @@ const friendlyError = (message: string): string => {
 /**
  * Panel "Nhập hợp đồng cải tạo từ Excel" — module Cấu hình khai thác.
  * File chỉ chứa cải tạo (sheet 2), khớp theo mã HĐ thuê của căn đã khởi tạo.
- * Import thật xong BE TỰ ĐỘNG gửi Host (PENDING_HOST_REVIEW). Gọi importRenovationExcel.
+ * Import thật xong BE TỰ ĐỘNG gửi Owner (PENDING_HOST_REVIEW). Gọi importRenovationExcel.
  */
 export const RenovationImportPanel = ({ onImported }: { onImported?: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +101,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
       } else {
         setPhase('done');
         // `contractsProcessed`, KHÔNG phải `results.length` — `results` gồm cả căn bị bỏ qua.
-        toast.success(`Đã nhập cải tạo cho ${res.contractsProcessed} căn — đã gửi Host`);
+        toast.success(`Đã nhập cải tạo cho ${res.contractsProcessed} căn — đã gửi Owner`);
         onImported?.();
       }
     } catch (err) {
@@ -131,7 +131,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
           <p className="mt-1 max-w-xl text-sm text-slate-500">
             File gồm cấu hình khai thác (nguyên căn / chia phòng), danh sách phòng, hợp đồng cải tạo
             và thiết bị mua mới — khớp theo mã HĐ thuê của căn đã khởi tạo.
-            Nhập xong, các căn <b className="text-slate-600">tự động được gửi Host</b> duyệt.
+            Nhập xong, các căn <b className="text-slate-600">tự động được gửi Owner</b> duyệt.
           </p>
         </div>
         <a href={TEMPLATE_URL} download
@@ -234,7 +234,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                 className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition">
                 {phase === 'importing'
                   ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang nhập...</>
-                  : <><Send className="h-4 w-4" /> Nhập & gửi Host</>}
+                  : <><Send className="h-4 w-4" /> Nhập & gửi Owner</>}
               </button>
             )}
           </div>
@@ -250,7 +250,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                   {r.propertyName && <span className="ml-2 font-mono text-xs text-slate-400">{r.contractCode}</span>}
                 </span>
                 <span className={`shrink-0 text-xs ${r.importStatus === 'SKIPPED' ? 'text-slate-500' : 'font-semibold text-emerald-700'}`}>
-                  {r.importStatus === 'SKIPPED' ? skipText(r) : 'Sẽ nhập cải tạo & gửi Host'}
+                  {r.importStatus === 'SKIPPED' ? skipText(r) : 'Sẽ nhập cải tạo & gửi Owner'}
                 </span>
               </li>
             ))}
@@ -262,7 +262,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
       {phase === 'done' && result && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-            <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo cho {result.contractsProcessed} căn — đã gửi Host duyệt
+            <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo cho {result.contractsProcessed} căn — đã gửi Owner duyệt
             {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} căn không nhập lại`}.
           </div>
 
@@ -281,7 +281,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                         {r.importStatus === 'SKIPPED' ? (
                           <span className="text-xs text-slate-500">{skipText(r)}</span>
                         ) : (
-                          <span className="whitespace-nowrap rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Đã gửi Host</span>
+                          <span className="whitespace-nowrap rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Đã gửi Owner</span>
                         )}
                       </td>
                     </tr>
@@ -301,12 +301,12 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
       <ConfirmDialog
         open={confirmOpen}
         tone="primary"
-        title="Xác nhận nhập cải tạo & gửi Host?"
+        title="Xác nhận nhập cải tạo & gửi Owner?"
         message={
           <>Hệ thống sẽ nhập cải tạo & thiết bị mua mới cho <b className="text-slate-700">{result?.contractsProcessed ?? 0} căn nhà</b> từ
-          file <b className="text-slate-700">{file?.name}</b>, sau đó tự động gửi Host duyệt.</>
+          file <b className="text-slate-700">{file?.name}</b>, sau đó tự động gửi Owner duyệt.</>
         }
-        confirmText="Nhập & gửi Host"
+        confirmText="Nhập & gửi Owner"
         loading={phase === 'importing'}
         onConfirm={() => { setConfirmOpen(false); run(false); }}
         onCancel={() => setConfirmOpen(false)}

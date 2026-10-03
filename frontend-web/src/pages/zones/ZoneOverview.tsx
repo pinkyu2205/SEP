@@ -20,7 +20,7 @@ import {
 } from './zoneAssignmentState';
 
 /**
- * Màn "Khu vực & Quản lý" — DÙNG CHUNG cho cả Admin và Host.
+ * Màn "Khu vực & Quản lý" — DÙNG CHUNG cho cả Admin và Owner.
  *
  * Nghiệp vụ: một quận/huyện chỉ có MỘT quản lý vận hành, và gán cho khu vực nghĩa
  * là gán cho mọi nhà bên trong. Cả hai vai đều cần nhìn thấy khu vực nào đang do ai
@@ -42,7 +42,7 @@ const isUsableAccount = (u?: UserResponse) => !u || u.status === 'ACTIVE';
  * nhà này được gán lẻ từng căn qua `PATCH /properties/{id}/operation-manager`, đường đó
  * không ghi vào bảng phân công.
  *
- * Hệ quả người dùng gặp phải: lúc host duyệt một nhà mới, BE tra đúng bảng đó để tự gán
+ * Hệ quả người dùng gặp phải: lúc owner duyệt một nhà mới, BE tra đúng bảng đó để tự gán
  * (`PropertyOnboardingServiceImpl.hostConfirm`). Không có bản ghi → nhà rơi vào
  * "Chờ gán quản lý" dù khu vực nhìn như đã có người phụ trách.
  *
@@ -56,8 +56,8 @@ type ContractLoad = { active: number; pending: number; draft: number };
 
 /**
  * Một khách đang gắn với nhà (hợp đồng CHƯA kết thúc) — bản gọn dùng chung cho hai vai.
- * Host đọc từ `/host/contracts`, Admin từ `/tenant-contracts` (Admin không gọi được
- * endpoint của Host), hai DTO khác tên trường nên chuẩn hoá về đây.
+ * Owner đọc từ `/owner/contracts`, Admin từ `/tenant-contracts` (Admin không gọi được
+ * endpoint của Owner), hai DTO khác tên trường nên chuẩn hoá về đây.
  */
 interface TenantLite {
   id: string;
@@ -258,7 +258,7 @@ const AssignModal = ({
    * Quản lý đang đăng ký cho khu vực này theo bảng phân công (`zone_managers`) — KHÁC
    * `group.managerId`, cái đó suy từ `property.operationManagerId`.
    *
-   * Cần riêng vì hai thứ lệch nhau là chuyện bình thường: nhà chờ Host duyệt giá thì chưa
+   * Cần riêng vì hai thứ lệch nhau là chuyện bình thường: nhà chờ Owner duyệt giá thì chưa
    * mang id quản lý nào, nên `group.managerId` trống trong khi khu vực đã có người phụ
    * trách. Không có con số này thì không biết bấm Gán có tạo ra thay đổi gì không.
    */
@@ -317,7 +317,7 @@ const AssignModal = ({
    *
    * Máy chủ ghi bảng phân công (`zone_managers`) TRƯỚC rồi mới áp lên từng nhà
    * (`ZoneAssignmentServiceImpl.assignManager` dòng 96-105), nên gán một khu vực chưa có
-   * nhà nào đổi được vẫn có tác dụng thật: đăng ký người phụ trách để nhà tự nhận khi Host
+   * nhà nào đổi được vẫn có tác dụng thật: đăng ký người phụ trách để nhà tự nhận khi Owner
    * duyệt giá xong.
    *
    * Trước đây nút khoá cứng theo `changeCount === 0`, nên khu vực toàn nhà chờ duyệt là
@@ -578,7 +578,7 @@ const AssignModal = ({
                   )}
                   {changeCount === 0 && registryChanges && (
                     <li className="text-emerald-700">
-                      • Chưa nhà nào đổi ngay — nhà sẽ tự về tay người này khi Host duyệt giá
+                      • Chưa nhà nào đổi ngay — nhà sẽ tự về tay người này khi Owner duyệt giá
                     </li>
                   )}
                 </ul>
@@ -843,7 +843,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
   loads: Map<string, ManagerLoad>;
   /** id → tên hiển thị lấy từ danh sách tài khoản quản lý, dùng khi property trả tên rỗng. */
   mgrNames: Map<string, string>;
-  /** Chỉ Host được gán/đổi; Admin xem thôi. */
+  /** Chỉ Owner được gán/đổi; Admin xem thôi. */
   canAssign: boolean;
   /** Bán kính ảnh hưởng nếu gỡ quản lý — dùng để báo trước ngay trên nút Gỡ. */
   impact: RemovalImpact;
@@ -860,7 +860,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
     fromProperty || (id ? mgrNames.get(id) : undefined) || '—';
 
   // Khu vực có quản lý nhưng tài khoản người đó đang không dùng được → khu vực coi như
-  // treo dù nhìn "đã gán". Đây là chỗ Admin cần thấy để nhắc Host đổi người.
+  // treo dù nhìn "đã gán". Đây là chỗ Admin cần thấy để nhắc Owner đổi người.
   const brokenAccount = group.managerBreakdown.some((b) => !isUsableAccount(userMap.get(b.managerId)));
   // Nút vẫn bấm được để hộp thoại giải thích, chỉ làm nhạt đi để báo trước là sẽ không gỡ được.
   const removeBlocked = impact.blocked || registryGap;
@@ -875,7 +875,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
   const ownHouses = group.managerId
     ? group.properties.filter((p) => p.operationManagerId === group.managerId).length
     : 0;
-  /** Nhà chưa mang id quản lý (thường đang chờ Host duyệt giá) — sẽ tự về tay người giữ khu vực. */
+  /** Nhà chưa mang id quản lý (thường đang chờ Owner duyệt giá) — sẽ tự về tay người giữ khu vực. */
   const waitingHouses = group.properties.filter((p) => !p.operationManagerId).length;
   const occupied = occupiedIn(group.properties, tenants);
 
@@ -941,7 +941,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
                 <p className="text-[11px] text-slate-400">
                   giữ <b className="text-slate-600">{ownHouses}/{group.properties.length}</b> nhà ở đây
                   {waitingHouses > 0 && ownHouses < group.properties.length && (
-                    <span title="Nhà chưa nhận quản lý (thường đang chờ Host duyệt giá) — sẽ tự về tay người này">
+                    <span title="Nhà chưa nhận quản lý (thường đang chờ Owner duyệt giá) — sẽ tự về tay người này">
                       {' '}· {waitingHouses} chờ nhận
                     </span>
                   )}
@@ -1050,7 +1050,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
                       <b>&quot;Chờ gán quản lý&quot;</b> thay vì tự vào tay người này.
                       {canAssign
                         ? ' Bấm "Gán quản lý" một lần để đăng ký, các lần duyệt sau sẽ tự động.'
-                        : ' Host cần bấm "Gán quản lý" một lần để đăng ký.'}
+                        : ' Owner cần bấm "Gán quản lý" một lần để đăng ký.'}
                     </p>
                   </div>
                 )}
@@ -1321,7 +1321,7 @@ const ManagerOverview = ({ groups, managers, userMap, tenants, tenantsKnown, onO
                 </div>
                 {r.waitingCount > 0 && (
                   <p className="mt-2 text-[10px] text-slate-400">
-                    &quot;chờ&quot; = nhà chưa nhận quản lý (đang chờ Host duyệt giá), sẽ tự về tay người này.
+                    &quot;chờ&quot; = nhà chưa nhận quản lý (đang chờ Owner duyệt giá), sẽ tự về tay người này.
                   </p>
                 )}
               </div>
@@ -1384,7 +1384,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
    * Các khu vực CÓ BẢN GHI trong bảng phân công `zone_managers` (GET /zones/assignments).
    *
    * Khác với `group.managerId` — cái đó FE suy ra từ `operationManagerId` của từng nhà.
-   * Hai thứ này lệch nhau được, và khi lệch thì việc tự gán quản lý lúc host duyệt nhà sẽ
+   * Hai thứ này lệch nhau được, và khi lệch thì việc tự gán quản lý lúc owner duyệt nhà sẽ
    * không chạy (xem `registryGap` bên dưới).
    */
   const [registeredZones, setRegisteredZones] = useState<Set<string>>(new Set());
@@ -1405,7 +1405,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       setManagers(mgrs);
       setProperties(propsRes);
 
-      // Bảng phân công thật. Cả Admin lẫn Host đều đọc được, và cả hai đều cần thấy khu vực
+      // Bảng phân công thật. Cả Admin lẫn Owner đều đọc được, và cả hai đều cần thấy khu vực
       // nào chưa đăng ký để biết vì sao nhà mới duyệt không tự vào tay ai.
       try {
         const assignments = await zoneAssignmentService.list();
@@ -1419,7 +1419,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       }
 
       // Hợp đồng chưa kết thúc của từng nhà — vừa để đếm bán kính ảnh hưởng khi gỡ quản lý,
-      // vừa để hiện ai đang thuê. Host đọc `/host/contracts`; Admin KHÔNG gọi được endpoint
+      // vừa để hiện ai đang thuê. Owner đọc `/owner/contracts`; Admin KHÔNG gọi được endpoint
       // đó nên đọc `/tenant-contracts`. Hai DTO khác tên trường → chuẩn hoá về TenantLite.
       try {
         const lite: (TenantLite & { propertyId: number })[] = canAssign
@@ -1462,7 +1462,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
         setContractsKnown(false); // hộp gỡ sẽ tự chuyển sang giọng "chưa xác minh được"
       }
 
-      // SĐT / trạng thái tài khoản quản lý — host có thể không đủ quyền, không có thì thôi.
+      // SĐT / trạng thái tài khoản quản lý — owner có thể không đủ quyền, không có thì thôi.
       try {
         const users = await userService.getAllUsers();
         const map = new Map<string, UserResponse>();
@@ -1487,8 +1487,8 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
    * Khu vực, có bù thêm BẢNG PHÂN CÔNG cho trường hợp chưa nhà nào mang quản lý.
    *
    * `groupByZone` suy quản lý từ `property.operationManagerId`, mà nhà chỉ nhận id đó SAU
-   * khi Host duyệt giá. Nên ở đúng bước đầu của quy trình — admin vừa gửi nhà, Host gán
-   * quản lý khu vực rồi mới đi duyệt — khu vực vẫn hiện "Chưa gán" dù vừa gán xong. Host
+   * khi Owner duyệt giá. Nên ở đúng bước đầu của quy trình — admin vừa gửi nhà, Owner gán
+   * quản lý khu vực rồi mới đi duyệt — khu vực vẫn hiện "Chưa gán" dù vừa gán xong. Owner
    * bấm gán, thấy không có gì đổi, tưởng hỏng.
    *
    * Chỉ bù khi **không có nhà nào đổi được** (`assignableCount === 0`): lúc đó bảng phân
@@ -1602,7 +1602,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           <h1 className="text-2xl font-bold text-slate-900">Khu vực &amp; Quản lý</h1>
           <p className="mt-1 text-sm text-slate-500">
             Mỗi quận/huyện do <b>một</b> quản lý vận hành phụ trách — gán cho khu vực là gán cho mọi nhà bên trong.
-            {audience === 'admin' && ' Xem toàn hệ thống; việc gán/đổi quản lý do Host quyết định.'}
+            {audience === 'admin' && ' Xem toàn hệ thống; việc gán/đổi quản lý do Owner quyết định.'}
           </p>
         </div>
         <button
@@ -1801,7 +1801,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           <p className="text-sm">
             {search
               ? `Không tìm thấy khu vực khớp "${search}"`
-              : 'Chưa có nhà nào — khu vực sẽ hiện ở đây ngay khi admin gửi nhà cho Host duyệt giá.'}
+              : 'Chưa có nhà nào — khu vực sẽ hiện ở đây ngay khi admin gửi nhà cho Owner duyệt giá.'}
           </p>
         </div>
       ) : (

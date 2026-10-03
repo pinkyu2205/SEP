@@ -374,7 +374,7 @@ const ContractDetailView: React.FC<{
           <View style={{ flex: 1 }}>
             <Text style={[detailStyles.statusBannerLabel, { color: cfg.color }]}>{cfg.label}</Text>
             {contract.status === 'pending_approval' && (
-              <Text style={detailStyles.statusBannerSub}>Đang chờ Host/Admin xem xét</Text>
+              <Text style={detailStyles.statusBannerSub}>Đang chờ Owner/Admin xem xét</Text>
             )}
             {contract.status === 'approved' && (
               <Text style={[detailStyles.statusBannerSub, { color: Colors.info }]}>
@@ -561,7 +561,7 @@ const ContractDetailView: React.FC<{
                 style={detailStyles.actionBtnPrimary}
                 onPress={() => onAction('submit', contract)}
               >
-                <IconText icon="send" style={detailStyles.actionBtnPrimaryText}>Gửi duyệt cho Host</IconText>
+                <IconText icon="send" style={detailStyles.actionBtnPrimaryText}>Gửi duyệt cho Owner</IconText>
               </TouchableOpacity>
             </>
           )}
@@ -683,7 +683,7 @@ export const ContractListScreen: React.FC<Props> = () => {
       case 'submit':
         showAlert(
           'Gửi duyệt hợp đồng',
-          `Gửi hợp đồng ${contract.code} đến Host/Admin để xem xét phê duyệt?`,
+          `Gửi hợp đồng ${contract.code} đến Owner/Admin để xem xét phê duyệt?`,
           [
             { text: 'Hủy', style: 'cancel' },
             {
@@ -707,7 +707,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                showAlert('Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
+                showAlert('Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Owner/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
               },
             },
           ]
@@ -1105,7 +1105,7 @@ listContent: {
   },
   emptyCreateBtnText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
 
-  // Section tabs (manager: tenant vs host)
+  // Section tabs (manager: tenant vs owner)
   sectionTabRow: {
     flexDirection: 'row', marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: 4,

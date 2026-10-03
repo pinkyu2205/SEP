@@ -8,7 +8,7 @@ import { Icon, type IconName } from './Icon';
  * Nơi hiển thị mọi thông báo của app. Mount MỘT lần ở App.tsx.
  *
  * Vì sao cần: Alert.alert của react-native-web là no-op, còn window.alert/confirm thì
- * kèm dòng "localhost:8081 cho biết" và không theo giao diện app. Host này nhận yêu cầu
+ * kèm dòng "localhost:8081 cho biết" và không theo giao diện app. Owner này nhận yêu cầu
  * từ showAlert() (hàm thường, gọi được ở mọi nơi kể cả ngoài component) rồi render
  * popup React — dùng chung một kiểu trên cả web lẫn native.
  *

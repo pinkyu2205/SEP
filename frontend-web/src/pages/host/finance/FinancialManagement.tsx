@@ -24,7 +24,7 @@ import {
 //  - Mọi khối đều bám theo KỲ đang chọn (BE nhận tham số month=YYYY-MM):
 //      /host/finance/cashflow · /host/finance/property-pnl
 //      /host/reports/property-performance · /host/invoices · /host/expenses
-//  - Chỉ hiển thị các nhà Host ĐÃ DUYỆT GIÁ; nhà chưa gán quản lý → banner nhắc.
+//  - Chỉ hiển thị các nhà Owner ĐÃ DUYỆT GIÁ; nhà chưa gán quản lý → banner nhắc.
 //  - KPI + biểu đồ (kỳ đang chọn) + bảng đối soát dùng CHUNG 1 nguồn nên luôn khớp.
 //  - BE chưa có dữ liệu → hiển thị 0 / trạng thái trống trung thực.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -362,7 +362,7 @@ export const FinancialManagement = () => {
               <p className="mt-0.5 text-xs text-amber-700">Nhà chưa có quản lý sẽ không thu được tiền phòng (dòng tiền vào = 0). Hãy gán quản lý để bắt đầu vận hành & ghi nhận doanh thu.</p>
               <div className="mt-2.5 flex flex-wrap gap-2">
                 {needManager.map(p => (
-                  <Link key={p.id} to={`/host/properties/${p.id}`}
+                  <Link key={p.id} to={`/owner/properties/${p.id}`}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100">
                     <UserPlus className="h-3.5 w-3.5" /> Gán quản lý · {p.name}
                   </Link>
@@ -523,7 +523,7 @@ export const FinancialManagement = () => {
               ))}
               {pagedRows.length === 0 && (
                 <TableState colSpan={9} loading={loading} filtered={rowFilters > 0}
-                  empty="Chưa có nhà nào được Host duyệt giá." />
+                  empty="Chưa có nhà nào được Owner duyệt giá." />
               )}
               {rows.length > 0 && (
                 <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-slate-900">

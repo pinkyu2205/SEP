@@ -73,7 +73,7 @@ const STATUS_TO_STEP: Record<string, number> = {
  * chưa trả đủ → bước thanh toán · đã trả, chưa nhận cọc → bước nhận cọc · đã nhận → bước cuối.
  */
 /**
- * Mốc host đã chuyển cọc. BE trả `refundPaidAt`, FE từng dùng tên `refundedAt` — đọc cả hai
+ * Mốc owner đã chuyển cọc. BE trả `refundPaidAt`, FE từng dùng tên `refundedAt` — đọc cả hai
  * để không phụ thuộc bên nào đổi tên trước.
  */
 const paidAtOf = (s?: { refundPaidAt?: string; refundedAt?: string }): string | undefined =>
@@ -105,7 +105,7 @@ const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
  * Ở RequestCheckoutScreen khách điền tài khoản vào 3 ô dưới mục "Tài khoản nhận hoàn cọc",
  * còn ghi chú là ô khác hẳn. FE mới gộp chúng vào một chuỗi `note` lúc gửi, vì
  * `CreateCheckoutRequest` bên BE chưa nhận field riêng
- * (xem doc-be/BE-NEED-tai-khoan-hoan-coc-cho-host-thay-2026-08-20.md).
+ * (xem doc-be/BE-NEED-tai-khoan-hoan-coc-cho-owner-thay-2026-08-20.md).
  *
  * Khuôn FE ghi ra là cố định — `TK hoàn cọc: {ngân hàng} — {số TK} — {chủ TK}` — nên tách
  * ngược lại an toàn. Dòng không khớp khuôn thì để nguyên ở phần ghi chú: thà hiện thô còn

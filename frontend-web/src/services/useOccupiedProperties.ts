@@ -7,7 +7,7 @@ import { handoverService } from './handover.service';
  * ─── Vì sao cần ──────────────────────────────────────────────────────────────
  * Hoá đơn điện/nước chỉ có nghĩa với căn đang có người ở. Ô chọn nhà ở trang "Hoá đơn
  * điện EVN" và "Hoá đơn nước" trước đây đổ ra toàn bộ 25 căn, kể cả nhà chưa ai thuê,
- * nhà còn chờ host duyệt — admin phải tự nhớ căn nào đang có khách, và chọn nhầm thì
+ * nhà còn chờ owner duyệt — admin phải tự nhớ căn nào đang có khách, và chọn nhầm thì
  * phát hành một hoá đơn không gửi cho ai.
  *
  * ─── Vì sao dùng `handover-status` ───────────────────────────────────────────

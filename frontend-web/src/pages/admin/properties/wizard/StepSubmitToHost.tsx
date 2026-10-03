@@ -45,7 +45,7 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
     } catch (err: any) {
       const data = err.response?.data;
       const msg = data?.message || data?.error || (typeof data === 'string' ? data : null)
-        || `Lỗi ${err.response?.status ?? ''} khi gửi cho Host`;
+        || `Lỗi ${err.response?.status ?? ''} khi gửi cho Owner`;
       setError(msg);
       setConfirmOpen(false);
       console.error('submit-to-host error:', data);
@@ -71,16 +71,16 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
             </p>
             <p className="mt-2 text-sm text-amber-700">
               Quy trình Onboarding đã chốt xong. Tuy nhiên tòa nhà cần hoàn tất cải tạo. 
-              Sau khi thi công xong, hãy quay lại và bấm <b>Hoàn tất Cải tạo</b> để gửi giá cho Host duyệt.
+              Sau khi thi công xong, hãy quay lại và bấm <b>Hoàn tất Cải tạo</b> để gửi giá cho Owner duyệt.
             </p>
           </div>
         ) : (
           <div className="mt-4 mx-auto max-w-md rounded-xl border border-blue-200 bg-blue-50 p-4 text-left">
             <p className="font-bold text-blue-800 flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5" /> Đã gửi cho Host
+              <CheckCircle2 className="w-5 h-5" /> Đã gửi cho Owner
             </p>
             <p className="mt-2 text-sm text-blue-700">
-              Hồ sơ tòa nhà và bảng giá đề xuất đã được gửi thành công. Vui lòng chờ Host đăng nhập để xét duyệt và kích hoạt tòa nhà.
+              Hồ sơ tòa nhà và bảng giá đề xuất đã được gửi thành công. Vui lòng chờ Owner đăng nhập để xét duyệt và kích hoạt tòa nhà.
             </p>
           </div>
         )}
@@ -188,21 +188,21 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
           disabled={submitting || !pricing}
           className="flex items-center gap-2 rounded-xl bg-emerald-600 px-8 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting ? 'Đang xử lý...' : <><Send className="w-4 h-4" /> Gửi Onboarding cho Host</>}
+          {submitting ? 'Đang xử lý...' : <><Send className="w-4 h-4" /> Gửi Onboarding cho Owner</>}
         </button>
       </div>
 
       <ConfirmDialog
         open={confirmOpen}
         tone="success"
-        title="Gửi Onboarding cho Host?"
+        title="Gửi Onboarding cho Owner?"
         message={
           <>
             Bạn chắc chắn muốn chốt quy trình Onboarding của <b className="text-slate-700">{property.propertyName}</b> và
-            gửi bảng giá cho Host phê duyệt? Sau khi gửi sẽ không thể chỉnh sửa cho đến khi Host phản hồi.
+            gửi bảng giá cho Owner phê duyệt? Sau khi gửi sẽ không thể chỉnh sửa cho đến khi Owner phản hồi.
           </>
         }
-        confirmText="Gửi cho Host"
+        confirmText="Gửi cho Owner"
         loading={submitting}
         onConfirm={handleSubmit}
         onCancel={() => setConfirmOpen(false)}

@@ -8,7 +8,7 @@ import { Overlay } from '@/components/Overlay';
 import { MaskedField } from '@/components/MaskedField';
 
 /**
- * Dòng thời gian thuê của MỘT khách thuê — dùng chung cho cổng Host và cổng Admin.
+ * Dòng thời gian thuê của MỘT khách thuê — dùng chung cho cổng Owner và cổng Admin.
  *
  * "Lịch sử của khách thuê" không cần bảng audit riêng: bản chất nó chính là danh sách
  * hợp đồng của người đó xếp theo thời gian. Component này gom hợp đồng trên TOÀN BỘ
@@ -104,8 +104,8 @@ const StatTile = ({ value, label }: { value: number | string; label: string }) =
 /**
  * Mở hợp đồng cụ thể — do NƠI GỌI quyết định đi đâu.
  *
- * Không hardcode đường dẫn trong component này: nó dùng chung cho cả cổng Host
- * (`/host/contracts`) lẫn cổng Admin (`/admin/contracts`), hai trang khác nhau hoàn
+ * Không hardcode đường dẫn trong component này: nó dùng chung cho cả cổng Owner
+ * (`/owner/contracts`) lẫn cổng Admin (`/admin/contracts`), hai trang khác nhau hoàn
  * toàn. Nơi nào không truyền thì nút không hiện — thà thiếu nút còn hơn có nút bấm
  * vào ra trang trắng.
  */
@@ -254,7 +254,7 @@ export const TenantContractTimeline = ({ contracts, onOpenContract }: {
   );
 };
 
-// ── Drawer đầy đủ (dùng ở màn Khách thuê của Host) ───────────────────────────
+// ── Drawer đầy đủ (dùng ở màn Khách thuê của Owner) ───────────────────────────
 export const TenantTimelineDrawer = ({ who, contracts, onClose, onOpenContract }: {
   who: TenantIdentity;
   /** Toàn bộ hợp đồng đang có — component tự lọc ra của khách này. */
@@ -267,7 +267,7 @@ export const TenantTimelineDrawer = ({ who, contracts, onClose, onOpenContract }
   const display = who.name?.trim() || 'Khách thuê';
 
   // Định danh khách lấy từ hợp đồng mới nhất có dữ liệu (HĐ cũ có thể thiếu).
-  // Host/Admin xem được ĐẦY ĐỦ, nhưng hiển thị dạng che + nút mắt để không phơi sẵn
+  // Owner/Admin xem được ĐẦY ĐỦ, nhưng hiển thị dạng che + nút mắt để không phơi sẵn
   // trên màn hình. Việc CẤM xem chỉ áp dụng cho ROLE_MANAGER (BE tự mask).
   const cccd = useMemo(() => mine.find((c) => c.tenantCccd)?.tenantCccd, [mine]);
   const phone = who.phone || mine.find((c) => c.tenantPhone)?.tenantPhone;

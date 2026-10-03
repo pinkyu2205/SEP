@@ -14,7 +14,7 @@ import { SESSION_KEYS } from '@/services/core/session';
  *   • auth bằng header `Authorization: Bearer` trong frame STOMP `CONNECT`
  *   • FE chỉ subscribe `/user/queue/billing`, không publish `/app/...`
  *
- * BE tự fan-out theo quyền (tenant của hoá đơn, manager của toà, admin, host) nên
+ * BE tự fan-out theo quyền (tenant của hoá đơn, manager của toà, admin, owner) nên
  * màn hình KHÔNG phải lọc lại theo user.
  *
  * ⚠️ Payload KHÔNG có số tiền (BE cố ý ẩn tiền khỏi manager) — dùng để đổi trạng thái

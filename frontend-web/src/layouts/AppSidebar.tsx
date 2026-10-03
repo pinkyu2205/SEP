@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { BrandMark } from '@/components/common/BrandLogo';
 
 /**
- * Sidebar dùng chung cho cả Cổng Host và Admin Portal.
+ * Sidebar dùng chung cho cả Cổng Owner và Admin Portal.
  *
  * Trước đây mỗi cổng tự dựng một sidebar riêng (layouts/Sidebar.tsx và phần
  * SidebarContent trong AdminLayout.tsx) nên lệch nhau về khoảng cách, bo góc,
@@ -26,7 +26,7 @@ import { BrandMark } from '@/components/common/BrandLogo';
  * Màu nhấn hai cổng, lấy đúng hai nửa của logo (20/08/2026 — trước là indigo/cyan, không
  * liên quan gì tới nhận diện).
  *
- *   green → Cổng Host   · xanh chữ B, cổng vận hành hằng ngày
+ *   green → Cổng Owner   · xanh chữ B, cổng vận hành hằng ngày
  *   red   → Admin Portal · đỏ chữ H, cổng quản trị
  */
 export type SidebarAccent = 'green' | 'red';

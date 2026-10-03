@@ -76,7 +76,7 @@ export const maintenanceStatusMap = {
 type Badge = { label: string; color: string; dot: string };
 
 // Flow bảo trì mới 17/07: PENDING → APPROVED → WAITING_TENANT_CONFIRM → CLOSED
-// (nhánh REJECTED/CANCELLED). Web host chỉ giám sát — gom về 4 bucket hiển thị.
+// (nhánh REJECTED/CANCELLED). Web owner chỉ giám sát — gom về 4 bucket hiển thị.
 /** 7 trạng thái thật (enum MaintenanceStatus bên BE) — dùng thẳng cho badge từng dòng. */
 export const maintenanceReqStatusMap: Record<string, Badge> = {
   OPEN:                  { label: 'Chờ kiểm tra',  color: 'bg-amber-50 text-amber-700 border border-amber-200',   dot: 'bg-amber-500' },

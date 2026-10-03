@@ -13,8 +13,8 @@ import {
 // ══════════════════════════════════════════════════════════════════════════════
 // Khiếu nại hoàn cọc — admin phân xử.
 //
-// Vì sao màn này thuộc ADMIN chứ không phải host: khiếu nại là lời tố của khách
-// NHẮM VÀO HOST ("tôi chưa nhận được tiền anh nói đã chuyển"). Để host tự bác lời
+// Vì sao màn này thuộc ADMIN chứ không phải owner: khiếu nại là lời tố của khách
+// NHẮM VÀO HOST ("tôi chưa nhận được tiền anh nói đã chuyển"). Để owner tự bác lời
 // tố nhắm vào mình thì cơ chế đối chứng mất sạch ý nghĩa. BE cũng gác
 // `@PreAuthorize("hasRole('ADMIN')")` ở endpoint.
 //

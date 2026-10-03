@@ -4,7 +4,7 @@ import { notificationService, type AppNotificationDto } from '@/services/notific
 import { hostService } from '@/services/host.service';
 
 /**
- * THÔNG BÁO REALTIME — dùng chung cho cổng Admin và cổng Host.
+ * THÔNG BÁO REALTIME — dùng chung cho cổng Admin và cổng Owner.
  *
  * ─── Vì sao viết theo kiểu "tự nâng cấp" ──────────────────────────────────────
  * BE hiện KHÔNG có kênh đẩy (13/08/2026: dò `/notifications/stream`, `/ws`,

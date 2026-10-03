@@ -6,7 +6,7 @@ import {
 } from '@/services/extensionRequest.service';
 
 /**
- * MỘT ĐƠN GIA HẠN THU GỌN — dùng chung cho cổng Admin (duyệt) và Host (chỉ xem).
+ * MỘT ĐƠN GIA HẠN THU GỌN — dùng chung cho cổng Admin (duyệt) và Owner (chỉ xem).
  *
  * Dòng thu gọn giữ đúng thứ đủ để xếp việc: ai, nhà/phòng nào, xin mấy tháng, gửi bao lâu
  * rồi và còn mấy ngày thì đơn tự đóng. Lời khách nhắn, ý kiến quản lý và nút duyệt nằm

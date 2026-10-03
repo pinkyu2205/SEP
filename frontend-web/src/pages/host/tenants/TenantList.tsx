@@ -16,9 +16,9 @@ import { isHostApproved } from '@/pages/host/properties/propertyListState';
 import { formatCurrency } from '@/utils';
 
 /**
- * KHÁCH THUÊ (Host) — trang về NGƯỜI và CHỖ Ở, không phải về hợp đồng.
+ * KHÁCH THUÊ (Owner) — trang về NGƯỜI và CHỖ Ở, không phải về hợp đồng.
  *
- * Phân vai rõ với `/host/contracts` (đúng như cách menu đang chia nhóm — trang này nằm ở
+ * Phân vai rõ với `/owner/contracts` (đúng như cách menu đang chia nhóm — trang này nằm ở
  * "Vận hành", trang kia ở "Hợp đồng"):
  *
  *   • TRANG NÀY   — ai đang ở căn nào, phòng nào còn trống, khách này từng thuê những đâu.
@@ -41,7 +41,7 @@ import { formatCurrency } from '@/utils';
  * bị BE bỏ mất tên khách (`toContractDto` không fallback `draftTenantName`), còn hợp đồng
  * đã chấm dứt thì BE gỡ hẳn `tenant_user_id` nên không truy ngược về ai được nữa. Hai
  * nhóm đó không thể xếp vào người nào — xem
- * `doc-be/BE-NEED-host-xem-hop-dong-nhu-admin-2026-08-19.md`.
+ * `doc-be/BE-NEED-owner-xem-hop-dong-nhu-admin-2026-08-19.md`.
  */
 
 
@@ -218,7 +218,7 @@ export const TenantList = () => {
     return properties
       .filter((p) => !kw || p.propertyName.toLowerCase().includes(kw))
       .filter((p) => !onlyOccupied || (occupancyByProp.get(p.id)?.occupied ?? 0) > 0)
-      // Căn đang có khách lên trước — host quan tâm chỗ đang chạy, không phải chỗ trống.
+      // Căn đang có khách lên trước — owner quan tâm chỗ đang chạy, không phải chỗ trống.
       .sort((a, b) => {
         const oa = occupancyByProp.get(a.id)?.occupied ?? 0;
         const ob = occupancyByProp.get(b.id)?.occupied ?? 0;
@@ -314,7 +314,7 @@ export const TenantList = () => {
           <h1 className="text-2xl font-bold text-slate-900">Khách thuê</h1>
           <p className="mt-1 text-sm text-slate-500">
             Ai đang ở đâu, phòng nào còn trống.{' '}
-            <Link to="/host/contracts" className="font-semibold text-primary-600 hover:underline">
+            <Link to="/owner/contracts" className="font-semibold text-primary-600 hover:underline">
               Xem điều khoản &amp; hồ sơ hợp đồng →
             </Link>
           </p>
@@ -497,7 +497,7 @@ export const TenantList = () => {
             <p className="rounded-xl border border-dashed border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-500">
               <b className="text-slate-700">{unlinkedUpcoming.length} hợp đồng chờ đón khách</b> chưa hiện ở đây
               vì backend chưa trả tên khách cho cổng Chủ nhà. Vẫn xem được ở{' '}
-              <Link to="/host/contracts" className="font-semibold text-primary-600 hover:underline">
+              <Link to="/owner/contracts" className="font-semibold text-primary-600 hover:underline">
                 Quản lý hợp đồng
               </Link>.
             </p>
@@ -506,7 +506,7 @@ export const TenantList = () => {
             <p className="rounded-xl border border-dashed border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-500">
               <b className="text-slate-700">{unlinkedPast.length} hợp đồng đã kết thúc</b> không truy được về khách nào —
               backend gỡ liên kết khách khi chấm dứt hợp đồng. Bản thân hợp đồng vẫn còn ở{' '}
-              <Link to="/host/contracts" className="font-semibold text-primary-600 hover:underline">
+              <Link to="/owner/contracts" className="font-semibold text-primary-600 hover:underline">
                 Quản lý hợp đồng
               </Link>.
             </p>
@@ -781,8 +781,8 @@ export const TenantList = () => {
           contracts={contracts}
           onClose={() => setTimelineOf(null)}
           // Mở hợp đồng đầy đủ ở trang Hợp đồng, mã HĐ đi kèm qua query để trang đó
-          // bung sẵn đúng hồ sơ — host khỏi phải tự tìm lại mã vừa đọc được ở đây.
-          onOpenContract={(c) => navigate(`/host/contracts?contract=${encodeURIComponent(c.code)}`)}
+          // bung sẵn đúng hồ sơ — owner khỏi phải tự tìm lại mã vừa đọc được ở đây.
+          onOpenContract={(c) => navigate(`/owner/contracts?contract=${encodeURIComponent(c.code)}`)}
         />
       )}
     </div>

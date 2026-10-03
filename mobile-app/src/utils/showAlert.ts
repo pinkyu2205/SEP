@@ -46,7 +46,7 @@ export function showAlert(title: string, message?: string, buttons?: AlertButton
     return;
   }
 
-  // ── Fallback khi chưa có host ──
+  // ── Fallback khi chưa có owner ──
   if (Platform.OS === 'web') {
     const fullMsg = message ? `${title}\n\n${message}` : title;
     if (buttons && buttons.length > 1) {

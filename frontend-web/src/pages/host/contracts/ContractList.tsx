@@ -21,10 +21,10 @@ import {
 import { MASTER_LEASE_STATUS, MasterLeaseDetailDrawer, leaseStatusMeta } from './MasterLeaseDetailDrawer';
 
 /**
- * HỢP ĐỒNG (Host) — hai loại hợp đồng ở hai đầu của cùng một căn nhà, nên tách hai tab:
+ * HỢP ĐỒNG (Owner) — hai loại hợp đồng ở hai đầu của cùng một căn nhà, nên tách hai tab:
  *
  *   • Quản lý ↔ Khách thuê   — hợp đồng công ty cho khách thuê (nguồn THU)
- *   • Host ↔ Chủ nhà          — master lease, công ty thuê lại nhà của chủ (nguồn CHI)
+ *   • Owner ↔ Chủ nhà          — master lease, công ty thuê lại nhà của chủ (nguồn CHI)
  *
  * Bố cục cố ý GIỐNG trang `admin/ContractMonitoring.tsx`: cùng thẻ số liệu bấm-để-lọc,
  * cùng bộ lọc, cùng bảng, và bấm một dòng là mở cùng một drawer chi tiết
@@ -32,11 +32,11 @@ import { MASTER_LEASE_STATUS, MasterLeaseDetailDrawer, leaseStatusMeta } from '.
  * học hai giao diện.
  *
  * ⚠️ KHÔNG có duyệt giá / phê duyệt hợp đồng ở đây. Hệ thống đã bỏ hẳn luồng manager gửi
- * Host duyệt (quyết định nghiệp vụ), nên trang này là màn XEM thuần — đừng dựng lại nút
+ * Owner duyệt (quyết định nghiệp vụ), nên trang này là màn XEM thuần — đừng dựng lại nút
  * Duyệt/Từ chối khi thêm tính năng mới.
  *
- * ⚠️ Dữ liệu lấy từ `/host/contracts` (KHÔNG dùng `/properties/{id}/tenant-contracts` —
- * host là ROLE_OWNER, endpoint đó 403). Bản host trả về là bản RÚT GỌN: thiếu biên bản
+ * ⚠️ Dữ liệu lấy từ `/owner/contracts` (KHÔNG dùng `/properties/{id}/tenant-contracts` —
+ * owner là ROLE_OWNER, endpoint đó 403). Bản owner trả về là bản RÚT GỌN: thiếu biên bản
  * bàn giao, người ở cùng, ghi chú... Drawer tự thử nạp thêm qua `/tenant-contracts/{id}`
  * và nói rõ khi máy chủ chưa mở quyền, thay vì hiện trống trơn như thể chưa ai làm.
  */
@@ -47,7 +47,7 @@ type ActiveTab = 'tenant_contract' | 'master_lease';
 
 const TABS = [
   { key: 'tenant_contract' as const, label: 'Quản lý ↔ Khách thuê', icon: Users },
-  { key: 'master_lease' as const, label: 'Host ↔ Chủ nhà (master lease)', icon: Handshake },
+  { key: 'master_lease' as const, label: 'Owner ↔ Chủ nhà (master lease)', icon: Handshake },
 ];
 
 const DEPOSIT_STATUS: Record<string, { label: string; pill: string; box: string }> = {
@@ -57,12 +57,12 @@ const DEPOSIT_STATUS: Record<string, { label: string; pill: string; box: string 
   FORFEITED: { label: 'Đã khấu trừ', pill: 'bg-rose-100 text-rose-700', box: 'border-rose-200 bg-rose-50/50' },
 };
 
-/** Máy chủ chưa cho ROLE_OWNER đọc `/tenant-contracts/{id}` — nói cho Host biết vì sao thiếu. */
+/** Máy chủ chưa cho ROLE_OWNER đọc `/tenant-contracts/{id}` — nói cho Owner biết vì sao thiếu. */
 const HOST_BLOCKED_NOTE =
   'Máy chủ chưa mở quyền cho vai Chủ nhà đọc hồ sơ đầy đủ, nên phần biên bản bàn giao, '
   + 'người ở cùng và ghi chú tạm thời chưa hiện. Những mục này sẽ tự có khi backend bổ sung quyền.';
 
-/** `/host/contracts` trả bản rút gọn — nắn về đúng hình dạng drawer cần để vẽ ngay. */
+/** `/owner/contracts` trả bản rút gọn — nắn về đúng hình dạng drawer cần để vẽ ngay. */
 const toDetailSeed = (c: HostContractDto): ContractDetailSeed => ({
   id: Number(c.id),
   propertyId: c.propertyId,
@@ -121,7 +121,7 @@ export const ContractList = () => {
   /**
    * `?contract=<mã HĐ>` — mở sẵn đúng hồ sơ khi đi từ nơi khác sang.
    *
-   * Dùng ở dòng thời gian thuê của một khách (`TenantTimelineDrawer`): ở đó host đọc
+   * Dùng ở dòng thời gian thuê của một khách (`TenantTimelineDrawer`): ở đó owner đọc
    * được mã hợp đồng nhưng muốn xem bản scan / biên bản thiết bị / sổ cọc thì phải
    * sang trang này. Không có tham số này thì họ phải tự gõ lại mã vừa đọc vào ô tìm
    * kiếm — mã hiện ra mà không bấm được chính là ngõ cụt.
@@ -607,7 +607,7 @@ export const ContractList = () => {
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${cfg.color}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
                         </span>
-                        {/* `/host/contracts` không trả lý do chấm dứt — nó nằm trong
+                        {/* `/owner/contracts` không trả lý do chấm dứt — nó nằm trong
                             drawer chi tiết, nên ở bảng chỉ hiện trạng thái. */}
                       </td>
 
@@ -641,7 +641,7 @@ export const ContractList = () => {
                 {pageLeases.map((l) => {
                   const cfg = leaseStatusMeta(l.status);
                   const property = propertyOf(l.propertyId);
-                  // Doanh thu cho thuê ra của chính căn này — con số Host cần nhất.
+                  // Doanh thu cho thuê ra của chính căn này — con số Owner cần nhất.
                   const running = contracts.filter(
                     (c) => String(c.propertyId) === String(l.propertyId) && c.status === 'ACTIVE',
                   );

@@ -13,7 +13,7 @@ import { isIssue, type PreflightGroup, type PreflightReport } from './importPref
  *
  * Dry-run soi từng dòng và trả "dòng 7 sai". Bảng này soi từng CĂN NHÀ và nói "nhà MTX#07
  * còn 2 phòng trống nhưng file đang xếp 6 khách vào" — đó mới là thứ cho biết phải quay
- * lại hỏi host chứ không phải ngồi sửa file.
+ * lại hỏi owner chứ không phải ngồi sửa file.
  *
  * Chạy 100% trên trình duyệt (SheetJS), không gửi file đi đâu, nên hiện được ngay và
  * không tốn một lượt gọi BE nào.

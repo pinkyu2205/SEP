@@ -5,7 +5,7 @@
 export type PropertyStatus =
   | 'DRAFT'
   | 'UNDER_RENOVATION'
-  | 'RENOVATION_COMPLETED'   // căn import từ Excel dừng ở đây — đã cải tạo xong, chờ định giá & gửi Host
+  | 'RENOVATION_COMPLETED'   // căn import từ Excel dừng ở đây — đã cải tạo xong, chờ định giá & gửi Owner
   | 'PENDING_HOST_REVIEW'
   | 'ACTIVE'
   | 'RENTED'                  // nguyên căn đã được cho thuê — đang có HĐ tenant hiệu lực
@@ -240,7 +240,7 @@ export interface PropertyResponse {
   status: string;        // PropertyStatus
   /** @deprecated Dùng `listedPrice` / `appliedPrice`. Giữ cho code cũ. */
   price?: number;
-  /** Nhà NGUYÊN CĂN: giá niêm yết Host duyệt. Nhà chia phòng thì giá nằm ở từng phòng. */
+  /** Nhà NGUYÊN CĂN: giá niêm yết Owner duyệt. Nhà chia phòng thì giá nằm ở từng phòng. */
   listedPrice?: number;
   /** Nhà NGUYÊN CĂN: giá hợp đồng đang áp dụng. */
   appliedPrice?: number;
@@ -543,7 +543,7 @@ export interface RoomResponse {
   floor?: number | null;
   /** @deprecated Giữ cho code cũ — dùng `listedPrice` / `appliedPrice` thay thế. */
   price?: number;
-  /** Giá niêm yết: giá Host duyệt, mốc quay về khi khách trả phòng. */
+  /** Giá niêm yết: giá Owner duyệt, mốc quay về khi khách trả phòng. */
   listedPrice?: number;
   /** Giá đang áp dụng: giá hợp đồng hiện hành. Hoá đơn/doanh thu chạy theo số này. */
   appliedPrice?: number;
@@ -647,8 +647,8 @@ export interface PricingResponse {
 }
 
 // ── Mô hình định giá mới (FORWARD/REVERSE) — base /api/v1/properties/{id}/pricing ──
-// FORWARD: host biết lợi nhuận ròng mong muốn/tháng (pDesired).
-// REVERSE: host biết ROI %/năm (roiExpected) trên tổng vốn đầu tư.
+// FORWARD: owner biết lợi nhuận ròng mong muốn/tháng (pDesired).
+// REVERSE: owner biết ROI %/năm (roiExpected) trên tổng vốn đầu tư.
 export type PricingMode = 'FORWARD' | 'REVERSE';
 
 export interface CalculatePricingRequest {
@@ -807,7 +807,7 @@ export interface PricingReconciliationResponse {
 }
 
 // =============================================================================
-// ONBOARDING SUMMARY — Tổng hợp cho Host xem
+// ONBOARDING SUMMARY — Tổng hợp cho Owner xem
 // =============================================================================
 
 export interface OnboardingSummaryResponse {
@@ -832,7 +832,7 @@ export interface OnboardingSummaryResponse {
 }
 
 // =============================================================================
-// HOST CONFIRM — Host xác nhận giá & kích hoạt
+// HOST CONFIRM — Owner xác nhận giá & kích hoạt
 // =============================================================================
 
 export interface HostRoomPrice {
@@ -1183,7 +1183,7 @@ export interface TenantContractResponse {
    */
   nextEscalationDate?: string;
   nextEscalationAmount?: number;
-  /** Giá niêm yết lúc host duyệt (đối chiếu với `rentAmount` đã chốt với khách). */
+  /** Giá niêm yết lúc owner duyệt (đối chiếu với `rentAmount` đã chốt với khách). */
   listedPrice?: number;
   notes?: string;
   signedAt?: string;
@@ -1282,7 +1282,7 @@ export interface PropertyPurgeResponse {
 //   Luồng A (hao mòn):    OPEN → IN_REPAIR → CLOSED
 //   Luồng B (lỗi tenant): OPEN → TENANT_FAULT → CLOSED
 //                         OPEN → PENDING_TENANT_REPAIR → CLOSED | OUTSTANDING_DAMAGE
-// Web (host/admin) chỉ giám sát — duyệt/reject-fault/verify-repair/complete làm
+// Web (owner/admin) chỉ giám sát — duyệt/reject-fault/verify-repair/complete làm
 // trên mobile manager.
 // =============================================================================
 

@@ -158,8 +158,8 @@ export const EquipmentCatalogPage = () => {
     propertyService.getAllProperties()
       .then(page => {
         if (!active) return;
-        // Admin quản trị toàn hệ thống nên KHÔNG lọc theo trạng thái duyệt của Host.
-        // Bản dùng cho Host trước đây lọc `isHostApproved`, áp vào đây sẽ giấu mất các
+        // Admin quản trị toàn hệ thống nên KHÔNG lọc theo trạng thái duyệt của Owner.
+        // Bản dùng cho Owner trước đây lọc `isHostApproved`, áp vào đây sẽ giấu mất các
         // căn đang PENDING_HOST_REVIEW / nháp — đúng thứ admin cần thao tác nhất.
         const list = page ?? [];
         setProperties(list);

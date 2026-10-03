@@ -26,7 +26,7 @@ const CONFIG_STATUS_OPTIONS: StatusOption[] = [
   { value: 'DRAFT',                     label: 'Chờ cấu hình',        cls: 'border-slate-600 bg-slate-600 text-white' },
   { value: 'UNDER_RENOVATION',          label: 'Đang cải tạo',        cls: 'border-amber-500 bg-amber-500 text-white' },
   { value: 'RENOVATION_COMPLETED',      label: 'Đã hoàn tất cải tạo', cls: 'border-teal-600 bg-teal-600 text-white' },
-  { value: 'PENDING_HOST_REVIEW',       label: 'Chờ Host duyệt giá',  cls: 'border-blue-600 bg-blue-600 text-white' },
+  { value: 'PENDING_HOST_REVIEW',       label: 'Chờ Owner duyệt giá',  cls: 'border-blue-600 bg-blue-600 text-white' },
   { value: 'PENDING_OPERATION_MANAGER', label: 'Chờ gán quản lý',     cls: 'border-violet-600 bg-violet-600 text-white' },
   { value: 'ACTIVE',                    label: 'Đang kinh doanh',     cls: 'border-emerald-600 bg-emerald-600 text-white' },
   { value: 'DISABLED',                  label: 'Đã vô hiệu',          cls: 'border-rose-600 bg-rose-600 text-white' },
@@ -36,10 +36,15 @@ const CONFIG_STATUS_OPTIONS: StatusOption[] = [
 const CARD_HINT: Record<string, { label: string; cls: string; icon: LucideIcon }> = {
   DRAFT:                     { label: 'Chờ nhập cấu hình khai thác',            cls: 'bg-slate-100 text-slate-500',   icon: Settings2 },
   UNDER_RENOVATION:          { label: 'Đang thi công cải tạo',                  cls: 'bg-amber-50 text-amber-700',    icon: Hammer },
-  RENOVATION_COMPLETED:      { label: 'Đã cải tạo xong — chờ gửi Host duyệt giá', cls: 'bg-teal-50 text-teal-700',    icon: CheckCircle2 },
-  PENDING_HOST_REVIEW:       { label: 'Đang chờ Host phê duyệt giá',            cls: 'bg-blue-50 text-blue-600',      icon: Clock },
+  RENOVATION_COMPLETED:      { label: 'Đã cải tạo xong — chờ gửi Owner duyệt giá', cls: 'bg-teal-50 text-teal-700',    icon: CheckCircle2 },
+  PENDING_HOST_REVIEW:       { label: 'Đang chờ Owner phê duyệt giá',            cls: 'bg-blue-50 text-blue-600',      icon: Clock },
   PENDING_OPERATION_MANAGER: { label: 'Đã duyệt giá — chờ gán quản lý vận hành', cls: 'bg-violet-50 text-violet-600', icon: CheckCircle2 },
   ACTIVE:                    { label: 'Đang kinh doanh',                        cls: 'bg-emerald-50 text-emerald-600', icon: CheckCircle2 },
+  /*
+    RENTED chỉ có ở nhà seed demo (MTX#1–#6) — luồng thật nhà có khách vẫn là ACTIVE. Thiếu
+    dòng này thì thẻ nhà seed trống trơn, khác hẳn thẻ nhà import thật cùng đang kinh doanh.
+  */
+  RENTED:                    { label: 'Đang kinh doanh',                        cls: 'bg-emerald-50 text-emerald-600', icon: CheckCircle2 },
   DISABLED:                  { label: 'Đã vô hiệu hóa',                         cls: 'bg-slate-100 text-slate-500',   icon: XCircle },
 };
 
@@ -423,7 +428,7 @@ const RenovateRestartPanel = ({ property, onDone, onPropertyChanged }: {
               <p className="font-bold text-amber-900 text-sm">Nhà nguyên căn — cải tạo được cả khi đang có khách thuê</p>
               <p className="text-xs text-amber-700 mt-1 leading-relaxed">
                 Bấm bắt đầu sẽ mở đợt cải tạo mới ngay, kể cả khi khách vẫn đang ở. Sau khi nhập file
-                cải tạo bổ sung, tòa nhà chuyển sang <b>chờ Host duyệt lại giá</b> — hãy báo trước cho
+                cải tạo bổ sung, tòa nhà chuyển sang <b>chờ Owner duyệt lại giá</b> — hãy báo trước cho
                 khách thuê và đội vận hành.
               </p>
             </div>
@@ -456,7 +461,8 @@ const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | n
   if (b.status === 'RENOVATION_COMPLETED') return { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' };
   if (b.status === 'PENDING_HOST_REVIEW') return { label: 'Đã cải tạo xong', cls: 'bg-teal-100 text-teal-800' };
   if (b.status === 'PENDING_OPERATION_MANAGER') return { label: 'Chờ gán quản lý', cls: 'bg-violet-100 text-violet-800' };
-  if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
+  // RENTED chỉ có ở nhà seed demo — luồng thật nhà có khách vẫn là ACTIVE. Cùng là đang kinh doanh.
+  if (b.status === 'ACTIVE' || b.status === 'RENTED') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
   if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
   return null;
 };
@@ -465,9 +471,9 @@ const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | n
 const STATUS_DESC: Record<string, string> = {
   DRAFT: 'Nhà đã khởi tạo — nhập cấu hình cải tạo từ Excel để hoàn tất khai thác.',
   UNDER_RENOVATION: 'Đang trong quá trình cải tạo.',
-  RENOVATION_COMPLETED: 'Đã hoàn tất cải tạo — chờ gửi Host duyệt giá.',
-  PENDING_HOST_REVIEW: 'Đã cải tạo xong — đang chờ Host phê duyệt giá.',
-  PENDING_OPERATION_MANAGER: 'Host đã duyệt giá — chờ gán quản lý vận hành.',
+  RENOVATION_COMPLETED: 'Đã hoàn tất cải tạo — chờ gửi Owner duyệt giá.',
+  PENDING_HOST_REVIEW: 'Đã cải tạo xong — đang chờ Owner phê duyệt giá.',
+  PENDING_OPERATION_MANAGER: 'Owner đã duyệt giá — chờ gán quản lý vận hành.',
   ACTIVE: 'Tòa nhà đang kinh doanh.',
   DISABLED: 'Tòa nhà đã bị vô hiệu hóa.',
 };
@@ -483,7 +489,7 @@ const ROOM_STATUS: Record<RoomStatus, { label: string; cls: string }> = {
 const FLOW_STEPS = [
   { key: 'draft',    label: 'Khởi tạo hồ sơ',    desc: 'Hợp đồng đầu vào & thiết bị bàn giao' },
   { key: 'reno',     label: 'Cải tạo',           desc: 'Nhập hạng mục & thiết bị mua mới' },
-  { key: 'price',    label: 'Host duyệt giá',    desc: 'Chốt giá thuê trước khi mở bán' },
+  { key: 'price',    label: 'Owner duyệt giá',    desc: 'Chốt giá thuê trước khi mở bán' },
   { key: 'manager',  label: 'Gán quản lý',       desc: 'Chỉ định quản lý vận hành' },
   { key: 'active',   label: 'Kinh doanh',        desc: 'Sẵn sàng đón khách thuê' },
 ];
@@ -891,13 +897,13 @@ export const CauHinhKhaiThacPage = () => {
   const [loading, setLoading] = useState(true);
   const [renoTarget, setRenoTarget] = useState<PropertyResponse | null>(null);
   const [completingReno, setCompletingReno] = useState(false);
-  /** Nhà đang ở đợt cải tạo BỔ SUNG (đợt ≥ 2, chưa đóng) — hoàn tất xong phải gửi Host duyệt lại giá. */
+  /** Nhà đang ở đợt cải tạo BỔ SUNG (đợt ≥ 2, chưa đóng) — hoàn tất xong phải gửi Owner duyệt lại giá. */
   const [renoSupplement, setRenoSupplement] = useState(false);
 
   /**
    * Mở hộp xác nhận hoàn thành cải tạo. Tra đợt đang mở để biết đây có phải đợt bổ sung không:
-   * BE `completeRenovation` với đợt bổ sung chỉ đưa nhà về RENOVATION_COMPLETED mà KHÔNG gửi Host,
-   * và màn này không có nút gửi Host — không xử lý thì nhà kẹt ở đó.
+   * BE `completeRenovation` với đợt bổ sung chỉ đưa nhà về RENOVATION_COMPLETED mà KHÔNG gửi Owner,
+   * và màn này không có nút gửi Owner — không xử lý thì nhà kẹt ở đó.
    */
   const askCompleteRenovation = (b: PropertyResponse) => {
     setRenoTarget(b);
@@ -964,15 +970,15 @@ export const CauHinhKhaiThacPage = () => {
     setCompletingReno(true);
     try {
       const updated = await propertyService.completeRenovation(targetId);
-      // Đợt bổ sung (hoặc lắp thiết bị xong) → BE dừng ở RENOVATION_COMPLETED. Gửi Host luôn,
+      // Đợt bổ sung (hoặc lắp thiết bị xong) → BE dừng ở RENOVATION_COMPLETED. Gửi Owner luôn,
       // giống import file bổ sung, để nhà không nằm kẹt ở trạng thái không có nút đi tiếp.
       if (updated?.status === 'RENOVATION_COMPLETED') {
         try {
           await propertyService.submitToHost(targetId);
-          toast.success('Đã hoàn tất cải tạo và gửi Host duyệt lại giá');
+          toast.success('Đã hoàn tất cải tạo và gửi Owner duyệt lại giá');
         } catch (submitErr: any) {
           if (!submitErr?.response?.data?.message && !submitErr?.response?.data?.error) {
-            toast.error('Đã hoàn tất cải tạo nhưng chưa gửi được Host duyệt giá');
+            toast.error('Đã hoàn tất cải tạo nhưng chưa gửi được Owner duyệt giá');
           }
         }
       }
@@ -1009,7 +1015,7 @@ export const CauHinhKhaiThacPage = () => {
           {renoSupplement ? (
             <>
               Đây là <b className="text-slate-700">đợt cải tạo bổ sung</b>: hệ thống sẽ tính lại giá và{' '}
-              <b className="text-slate-700">gửi Host duyệt lại</b>. Khách đang ở giữ nguyên giá trong hợp đồng.
+              <b className="text-slate-700">gửi Owner duyệt lại</b>. Khách đang ở giữ nguyên giá trong hợp đồng.
               Nếu đợt này có hạng mục cải tạo hoặc thiết bị, hãy nhập file bổ sung ở tab “Cải tạo lại” thay vì bấm ở đây.
             </>
           ) : (

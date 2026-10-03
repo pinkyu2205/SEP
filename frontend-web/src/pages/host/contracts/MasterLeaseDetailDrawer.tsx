@@ -10,9 +10,9 @@ import type { HostContractDto, MasterLease } from '@/services/host.service';
 import { daysLeft, fmtDate, statusMeta, termLabel } from '@/components/contract/contractLabels';
 
 /**
- * Chi tiết MỘT master lease (hợp đồng Host thuê lại nhà của chủ nhà) — chỉ có ở cổng Host.
+ * Chi tiết MỘT master lease (hợp đồng Owner thuê lại nhà của chủ nhà) — chỉ có ở cổng Owner.
  *
- * Khác hẳn hợp đồng khách thuê: ở đây Host là bên ĐI THUÊ, nên câu hỏi quan trọng nhất
+ * Khác hẳn hợp đồng khách thuê: ở đây Owner là bên ĐI THUÊ, nên câu hỏi quan trọng nhất
  * không phải "khách là ai" mà là **căn này có lãi không**. Vì vậy drawer đặt phần "Hiệu
  * quả khai thác" ngang hàng với điều khoản: tiền thuê vào mỗi tháng so với tổng tiền
  * đang cho thuê ra từ các hợp đồng khách còn hiệu lực trong chính căn đó.
@@ -126,7 +126,7 @@ export const MasterLeaseDetailDrawer = ({ lease, property, tenantContracts, onCl
                       {status.label}
                     </span>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
-                      Host là bên đi thuê
+                      Owner là bên đi thuê
                     </span>
                   </div>
                 </div>
@@ -158,7 +158,7 @@ export const MasterLeaseDetailDrawer = ({ lease, property, tenantContracts, onCl
             </div>
 
             {/* ── Hiệu quả khai thác ────────────────────────────────────────
-                Câu hỏi thật sự của Host: căn này đang lãi hay lỗ mỗi tháng. */}
+                Câu hỏi thật sự của Owner: căn này đang lãi hay lỗ mỗi tháng. */}
             <div className={`rounded-2xl border p-4 ${profitable ? 'border-emerald-200 bg-emerald-50/50' : 'border-rose-200 bg-rose-50/50'}`}>
               <h3 className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-slate-400">
                 {profitable ? <TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> : <TrendingDown className="h-3.5 w-3.5 text-rose-500" />}
@@ -309,7 +309,7 @@ export const MasterLeaseDetailDrawer = ({ lease, property, tenantContracts, onCl
             )}
 
             <p className="pb-2 text-center text-[11px] text-slate-400">
-              Mã hệ thống #{lease.id} · Master lease do Host ký với chủ nhà, tách khỏi hợp đồng khách thuê.
+              Mã hệ thống #{lease.id} · Master lease do Owner ký với chủ nhà, tách khỏi hợp đồng khách thuê.
             </p>
           </div>
         </div>

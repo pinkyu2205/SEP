@@ -14,7 +14,7 @@ import { periodMonthYear } from '@/utils/evnInvoiceParser';
 //   • Giao dịch `GET /api/v1/manager/payments`  — ghép với hoá đơn theo `invoiceCode`.
 //   • Tiền cọc  `GET /api/v1/admin/deposits`    — cọc nằm trên hợp đồng, không có
 //     trong bảng hoá đơn.
-//   • Host      `GET /api/v1/admin/hosts`       — chỉ để đếm ở Bảng điều hành.
+//   • Owner      `GET /api/v1/admin/hosts`       — chỉ để đếm ở Bảng điều hành.
 //
 // `GET /api/v1/admin/invoices` đã bị BE XOÁ HẲN (a52c370) vì nó dựng "hoá đơn ảo"
 // từ hợp đồng chứ không đọc bảng hoá đơn thật. Đừng gọi lại.
@@ -312,7 +312,7 @@ const depositToRow = (d: AdminDepositDto): AdminDepositRow => {
   };
 };
 
-// ── Host (giữ nguyên — dùng cho thẻ đếm ở Bảng điều hành) ─────────────────────
+// ── Owner (giữ nguyên — dùng cho thẻ đếm ở Bảng điều hành) ─────────────────────
 /** Khớp `AdminHostDto` của BE ({ id, name }) — user có role OWNER. */
 export interface AdminHost {
   id: string;
@@ -438,7 +438,7 @@ export const adminService = {
       .filter(r => !(DEAD_CONTRACT_STATUSES.has(r.contractStatus) && r.status !== 'PAID'));
   },
 
-  /** Danh sách host (user role OWNER) — chỉ để đếm ở Bảng điều hành. */
+  /** Danh sách owner (user role OWNER) — chỉ để đếm ở Bảng điều hành. */
   getHosts: async (): Promise<AdminHost[]> => {
     const res = await api.get<unknown, AdminHost[]>(
       `${ADMIN}/hosts`, { skipErrorToast: true } as object,

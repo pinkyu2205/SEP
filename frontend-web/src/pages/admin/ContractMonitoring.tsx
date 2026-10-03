@@ -19,7 +19,7 @@ import {
 
 /**
  * THEO DÕI HỢP ĐỒNG THUÊ (Admin) — toàn bộ hợp đồng tenant của mọi nhà, mọi trạng thái
- * (khác trang host/contracts/ContractList.tsx chỉ scope theo host đăng nhập).
+ * (khác trang owner/contracts/ContractList.tsx chỉ scope theo owner đăng nhập).
  * Nguồn: GET /tenant-contracts (không ép status) — không còn mock.
  *
  * Trang này để admin TRẢ LỜI NHANH ba câu, nên bố cục cũng theo đúng thứ tự đó:

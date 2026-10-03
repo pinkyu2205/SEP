@@ -502,7 +502,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
    *
    * Trước 24/08/2026 chính hàm này tự điền `rentAmount` từ `room.price`. Hệ quả: NHÀ
    * NGUYÊN CĂN không có ô chọn phòng nên hàm không bao giờ chạy, và ô giá thuê đứng
-   * nguyên ở 0đ dù host đã duyệt 37.500.000đ — cọc cũng theo đó mà ra 0.
+   * nguyên ở 0đ dù owner đã duyệt 37.500.000đ — cọc cũng theo đó mà ra 0.
    */
   const handleRoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, roomId: e.target.value }));
@@ -551,19 +551,19 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const depositMismatch = form.rentAmount !== '' && form.deposit !== '' && form.deposit !== standardDeposit;
 
   /**
-   * GIÁ DUYỆT — giá Host đã chốt cho nhà/phòng này.
+   * GIÁ DUYỆT — giá Owner đã chốt cho nhà/phòng này.
    *
    * Nhà nguyên căn thì giá nằm ở `property.price`; nhà chia phòng thì ở `room.price`.
-   * Đây là con số Host phê duyệt để kinh doanh, nên hợp đồng lệch khỏi nó là chuyện
+   * Đây là con số Owner phê duyệt để kinh doanh, nên hợp đồng lệch khỏi nó là chuyện
    * PHẢI thấy được — trước đây ô giá thuê tự do gõ, lệch bao nhiêu cũng lưu im lặng,
    * làm mất hết ý nghĩa của bước duyệt giá và không truy được ai đã hạ giá.
    *
    * 🎯 MÔ HÌNH ĐÃ CHỐT (PO 15/08/2026, BE làm xong cùng ngày):
-   * giá hợp đồng LUÔN BẰNG giá niêm yết. Thương lượng xong thì Host cập nhật giá
+   * giá hợp đồng LUÔN BẰNG giá niêm yết. Thương lượng xong thì Owner cập nhật giá
    * ở màn chi tiết nhà TRƯỚC, rồi ô này chỉ đọc — không gõ tay được nữa.
    *
    * Nhờ vậy chuyện "lệch giá" không còn xảy ra để mà phải xử lý: không có đường nào
-   * nhập một con số Host chưa duyệt. BE cũng tự kiểm lại nên gọi thẳng API cũng không lách được.
+   * nhập một con số Owner chưa duyệt. BE cũng tự kiểm lại nên gọi thẳng API cũng không lách được.
    */
   const approvedRent = useMemo(() => {
     if (!selectedProperty) return null;
@@ -584,7 +584,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
    *
    * Trước đây việc này nằm trong `handleRoomChange`, tức là chỉ chạy khi CHỌN PHÒNG.
    * Nhà nguyên căn không có ô phòng nên ô giá đứng ở 0đ trong khi ô chú thích vẫn nói
-   * "Lấy theo giá niêm yết Host đã duyệt" — và vì ô này `readOnly` khi đã tra được giá,
+   * "Lấy theo giá niêm yết Owner đã duyệt" — và vì ô này `readOnly` khi đã tra được giá,
    * admin cũng không gõ tay chữa được. Cọc tính theo giá nên cũng ra 0 luôn.
    *
    * Chỉ ghi khi tra được giá > 0: `approvedRent` null nghĩa là chưa chọn xong nhà/phòng,
@@ -1239,9 +1239,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               />
               {rentLocked ? (
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  Lấy theo giá niêm yết Host đã duyệt. Chốt giá khác với khách?{' '}
+                  Lấy theo giá niêm yết Owner đã duyệt. Chốt giá khác với khách?{' '}
                   <Link
-                    to={`/host/properties/${selectedProperty?.id}`}
+                    to={`/owner/properties/${selectedProperty?.id}`}
                     target="_blank"
                     className="font-bold text-indigo-600 hover:underline"
                   >

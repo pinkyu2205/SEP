@@ -6,10 +6,10 @@ import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import type { AppNotificationDto } from '@/services/notification.service';
 
 /**
- * KHAY THÔNG BÁO (chuông) — dùng chung cho cổng Admin và cổng Host.
+ * KHAY THÔNG BÁO (chuông) — dùng chung cho cổng Admin và cổng Owner.
  *
  * Trước 13/08/2026: chuông bên Admin chỉ là cái icon trỏ sang trang nhật ký bảo mật,
- * không có dữ liệu gì; bên Host có badge nhưng chỉ đếm MỘT LẦN lúc mở trang, mở app
+ * không có dữ liệu gì; bên Owner có badge nhưng chỉ đếm MỘT LẦN lúc mở trang, mở app
  * cả buổi cũng không đổi số. Giờ cả hai dùng chung `useRealtimeNotifications` nên số
  * tự cập nhật, và bấm vào là đọc được nội dung tại chỗ, không phải chuyển trang.
  *
@@ -41,7 +41,7 @@ const toneOf = (type: string) => {
 };
 
 export const NotificationBell = ({
-  /** Trang xem tất cả — khác nhau giữa admin và host. */
+  /** Trang xem tất cả — khác nhau giữa admin và owner. */
   seeAllTo,
   /** Chỉ hiện các loại này. Bỏ trống = tất cả. */
   types,
@@ -60,7 +60,7 @@ export const NotificationBell = ({
    * Số trên badge lấy từ CONTEXT, không từ danh sách trong khay.
    *
    * Hai chỗ đang đếm hai nguồn khác nhau: khay chỉ đọc bảng `notifications`, còn trang
-   * thông báo (và badge sidebar bên host) gộp thêm `host_notifications`. Để badge tự
+   * thông báo (và badge sidebar bên owner) gộp thêm `host_notifications`. Để badge tự
    * đếm thì chuông hiện trống trong khi trang báo hàng chục việc đang chờ — người dùng
    * tưởng chuông hỏng. Context đã gộp sẵn hai nguồn nên lấy thẳng từ đó cho khớp.
    *

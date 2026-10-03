@@ -14,7 +14,7 @@ import type { PropertyResponse, RoomResponse, TenantContractResponse } from '@/t
  * sau khi BE trả về danh sách dòng bị bỏ.
  *
  * ─── Nguồn sự thật: PHÒNG, không phải `totalRooms` ───────────────────────────
- * `PropertyResponse.totalRooms` là con số KHAI BÁO trên hồ sơ nhà (host/admin gõ vào
+ * `PropertyResponse.totalRooms` là con số KHAI BÁO trên hồ sơ nhà (owner/admin gõ vào
  * lúc tạo). Danh sách phòng thật (`GET /properties/{id}/rooms`) mới là thứ hợp đồng
  * gắn vào được. Hai con số này LỆCH NHAU ĐƯỢC — và đó chính là tình huống "host khai
  * 6 phòng nhưng nhà chỉ dựng được 5": khai 6, tạo thật 5, dòng Excel thứ 6 trỏ vào
@@ -36,7 +36,7 @@ export type SlotState = 'AVAILABLE' | 'RENTED' | 'MAINTENANCE' | 'DRAFT' | 'HAS_
 /**
  * `DRAFT` = phòng ĐÃ TẠO NHƯNG CHƯA ĐƯỢC KÍCH HOẠT.
  *
- * Không phải "chưa định giá" — giá thường đã có từ lúc host duyệt. Quy trình đúng là nhà
+ * Không phải "chưa định giá" — giá thường đã có từ lúc owner duyệt. Quy trình đúng là nhà
  * sang `ACTIVE` thì BE tự chuyển mọi phòng `DRAFT` → `AVAILABLE`
  * (`PropertyOnboardingServiceImpl.activateDraftRoomsPerRoom`), không có thao tác tay nào.
  *
@@ -65,7 +65,7 @@ export interface PropertyOccupancy {
    *
    * Cần để phân biệt hai lý do khiến một căn không có phòng nào mở cho thuê:
    *   • nhà CHƯA hoạt động → đúng quy trình, chưa tới lượt, không phải lỗi
-   *   • nhà ĐÃ hoạt động   → BẤT THƯỜNG: host đã duyệt giá, đã có quản lý, mà phòng
+   *   • nhà ĐÃ hoạt động   → BẤT THƯỜNG: owner đã duyệt giá, đã có quản lý, mà phòng
    *     vẫn kẹt ở `DRAFT` nên không ai xếp khách vào được
    */
   propertyStatus: string;

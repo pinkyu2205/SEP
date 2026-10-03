@@ -32,7 +32,7 @@ const fmtDate = (iso?: string): string => {
 
 // ── Modal chi tiết ────────────────────────────────────────────────────────────
 // Flow mới 17/07: duyệt request/báo xong/review-reject làm trên mobile manager;
-// web host chỉ giám sát. (Khối "duyệt chi phí PENDING_APPROVAL" cũ đã bỏ — chi phí
+// web owner chỉ giám sát. (Khối "duyệt chi phí PENDING_APPROVAL" cũ đã bỏ — chi phí
 // chuyển sang luồng hóa đơn sau CLOSED, và PUT /approve giờ nghĩa là duyệt request.)
 const DetailModal = ({ request, onClose }: {
   request: MaintenanceRequestResponse;

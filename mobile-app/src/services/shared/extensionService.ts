@@ -11,7 +11,7 @@ import realApiClient from '@/services/core/realApiClient';
  * Đơn gửi CÙNG LÚC cho ba vai, không xếp tầng:
  *   • Quản lý — xem và thêm ý kiến, KHÔNG duyệt. Họ nắm thứ admin không có: khách trả
  *     tiền đúng hạn không, phòng có bị phàn nàn không.
- *   • Host    — xem.
+ *   • Owner    — xem.
  *   • Admin   — người duy nhất bấm duyệt, vì chỉ họ nắm hợp đồng với chủ nhà còn bao lâu.
  *
  * Gia hạn chỉ kéo dài thời gian, **KHÔNG đổi giá thuê** — nhờ vậy không ai phải quyết con

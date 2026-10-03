@@ -12,14 +12,14 @@ import { InvoiceBoard, type InvoiceBoardRow } from '@/components/billing/Invoice
 import { currentMonth, monthLabel, shiftMonth, useServerPeriod } from '../shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Hoá đơn & Thanh toán (Host). Giao diện dùng chung với admin: `components/billing/InvoiceBoard`
+// Hoá đơn & Thanh toán (Owner). Giao diện dùng chung với admin: `components/billing/InvoiceBoard`
 // (làm lại 24/09/2026 — trước là hai file chép tay đã lệch nhau).
 //
 // Nguồn dữ liệu phụ thuộc quyền BE; trang tự dò (`canUseFullInvoices`):
 //  A. ĐẦY ĐỦ  — `GET /api/v1/manager/invoices` + `/api/v1/manager/payments` (hoá đơn thật).
 //  B. RÚT GỌN — `GET /api/v1/host/invoices?month=` (fallback khi A trả 403): hoá đơn tiền
 //     phòng suy từ hợp đồng của đúng 1 kỳ, không có mã thật / điện nước / giao dịch.
-// Kiểm tra 03/10/2026: host ĐỌC ĐƯỢC nguồn A; giữ B làm phương án lùi.
+// Kiểm tra 03/10/2026: owner ĐỌC ĐƯỢC nguồn A; giữ B làm phương án lùi.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const fromAdminRow = (r: AdminInvoiceRow): InvoiceBoardRow => ({ ...r, key: String(r.id) });
@@ -65,7 +65,7 @@ export const BillingPayments = () => {
       year: y,
       periodLabel: `Tiền nhà ${monthLabel(ym).toLowerCase()}`,
       amount: i.amount,
-      // BE host trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
+      // BE owner trả UNPAID; quy về PENDING cho khớp enum hoá đơn thật.
       status: (i.status === 'UNPAID' ? 'PENDING' : i.status) as AdminInvoiceStatus,
       dueDate: i.dueDate,
     })));
@@ -104,10 +104,10 @@ export const BillingPayments = () => {
         period={period}
         onPeriodChange={setPeriod}
         periods={periodOptions()}
-        // Chế độ rút gọn: BE host bắt buộc đúng 1 kỳ nên không có "tất cả".
+        // Chế độ rút gọn: BE owner bắt buộc đúng 1 kỳ nên không có "tất cả".
         allowAllPeriods={fullAccess !== false}
         canOpenDetail={fullAccess !== false}
-        maintenancePath="/host/maintenance"
+        maintenancePath="/owner/maintenance"
         exportName="HoaDonThanhToan_HoangBinhLand"
         notice={fullAccess === false && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -120,11 +120,11 @@ export const BillingPayments = () => {
                   đang hiệu lực: chưa có điện / nước / dịch vụ / phí sửa chữa và chưa có lịch sử giao dịch.
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-2">
-                  <Link to="/host/receivables"
+                  <Link to="/owner/receivables"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100">
                     Công nợ phải thu <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
-                  <Link to="/host/deposits"
+                  <Link to="/owner/deposits"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100">
                     <PiggyBank className="h-3.5 w-3.5" /> Sổ cọc
                   </Link>

@@ -14,7 +14,7 @@ import {
  * Khoản của đợt trước giữ nguyên "mỗi tháng"; đợt bổ sung chỉ cộng thêm khoản mới. Nên bảng
  * nhóm theo NGÀY BẮT ĐẦU khấu hao: nhóm đầu là lúc tiếp nhận nhà, các nhóm sau là từng đợt bổ sung.
  *
- * Kèm hai khối Host cần biết trước khi duyệt:
+ * Kèm hai khối Owner cần biết trước khi duyệt:
  *   • Dự phòng sửa chữa sau bảo hành — đã nằm trong giá.
  *   • Phần công ty tự chịu — KHÔNG nằm trong giá (thay đồ tương đương, khách đang ở giữ giá cũ).
  *

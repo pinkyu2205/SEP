@@ -17,10 +17,10 @@ import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
  *     hiện tại mỗi lần gọi API, không phải ghi lúc sự việc xảy ra.
  *
  * Hai nguồn khác bản chất nên KHÔNG trộn lẫn vào một danh sách phẳng — chia hai khối
- * có nhãn riêng. Trộn theo thời gian sẽ vô nghĩa: `createdAt` của nguồn host là lúc ai
+ * có nhãn riêng. Trộn theo thời gian sẽ vô nghĩa: `createdAt` của nguồn owner là lúc ai
  * đó mở danh sách lần đầu, không phải lúc việc phát sinh.
  *
- * ⚠️ Nguồn host hiện KHÔNG được dọn khi việc đã xong (BE chưa có delete/resolve) — đo
+ * ⚠️ Nguồn owner hiện KHÔNG được dọn khi việc đã xong (BE chưa có delete/resolve) — đo
  * ngày 13/08/2026: 50 thông báo "căn chờ duyệt giá" trong khi chỉ còn 45 căn thật sự
  * chờ. Vì vậy khối đó có ghi chú nhắc người đọc đối chiếu màn quản lý, đừng tin số.
  */
@@ -133,7 +133,7 @@ export const AdminNotificationCenter = () => {
   const { refresh: refreshBadge } = useUnreadNotifications();
 
   /**
-   * `allSettled`: một nguồn hỏng thì vẫn hiện nguồn kia. Nguồn host từng 500 vì NPE
+   * `allSettled`: một nguồn hỏng thì vẫn hiện nguồn kia. Nguồn owner từng 500 vì NPE
    * phía BE (đã sửa 13/08/2026) — không có lý do gì để nó kéo sập cả trang lần nữa.
    */
   const load = useCallback(async () => {

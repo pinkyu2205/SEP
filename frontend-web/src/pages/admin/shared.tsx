@@ -15,7 +15,7 @@ export const moneyTooltip = (value: any) => (typeof value === 'number' ? formatV
 
 export const roleConfig: Record<PlatformRole, { label: string; color: string }> = {
   admin: { label: 'Admin', color: 'bg-slate-950 text-white' },
-  host: { label: 'Host/Admin System', color: 'bg-cyan-100 text-cyan-800' },
+  host: { label: 'Owner/Admin System', color: 'bg-cyan-100 text-cyan-800' },
   manager: { label: 'Manager', color: 'bg-indigo-100 text-indigo-700' },
   tenant: { label: 'Tenant', color: 'bg-emerald-100 text-emerald-700' },
 };

@@ -11,12 +11,12 @@ import { ExtensionRequestRow, toggleInSet } from '@/components/contract/Extensio
 // ══════════════════════════════════════════════════════════════════════════════
 // Đơn xin gia hạn — cổng HOST, CHỈ ĐỌC.
 //
-// Host xem chứ không duyệt: máy chủ mở `GET /admin/extension-requests` cho
+// Owner xem chứ không duyệt: máy chủ mở `GET /admin/extension-requests` cho
 // `hasAnyRole('ADMIN','OWNER')`, còn `approve` / `reject` vẫn chỉ `ADMIN`. Màn này bám
 // đúng ranh giới đó — không có nút hành động nào, và cũng không nên có.
 //
-// Vì sao host vẫn cần thấy: thứ quyết định gia hạn được hay không là **hợp đồng của công
-// ty với chủ nhà còn bao lâu** — quan hệ đó là của host. Thấy đơn nào đang chờ thì host
+// Vì sao owner vẫn cần thấy: thứ quyết định gia hạn được hay không là **hợp đồng của công
+// ty với chủ nhà còn bao lâu** — quan hệ đó là của owner. Thấy đơn nào đang chờ thì owner
 // còn chủ động đi gia hạn hợp đồng gốc trước khi trần chạm đáy.
 // ══════════════════════════════════════════════════════════════════════════════
 
