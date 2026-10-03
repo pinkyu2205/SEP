@@ -596,6 +596,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                 <View key={inv.id} style={styles.settleRow}>
                   <Text style={styles.settleLabel}>
                     {CHARGE_LABEL[inv.type ?? ''] ?? 'Hoá đơn'} {inv.code || `#${inv.id}`}
+                    {inv.maintenanceRequestId ? ` (phiếu bảo trì M-${inv.maintenanceRequestId})` : ''}
                   </Text>
                   <Text style={styles.settleValueNeg}>{money(inv.amount)}</Text>
                 </View>

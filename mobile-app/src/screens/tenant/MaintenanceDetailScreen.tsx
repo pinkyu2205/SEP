@@ -12,7 +12,7 @@ import {
   pickEvidenceFromCamera, pickEvidenceFromLibrary, type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON, MAINTENANCE_BILLING_HINT_META,
+  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON, MAINTENANCE_BILLING_HINT_META, TENANT_CHARGE_STATUS_META,
   MAINTENANCE_VISIT_SLOT_MINUTES,
 } from '@/constants/maintenance';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
@@ -245,7 +245,13 @@ export const MaintenanceDetailScreen: React.FC = () => {
   // Chỉ hiện thẻ thanh toán khi tenant THỰC SỰ bị tính phí (lỗi do khách, manager sửa
   // hộ) — trường hợp chủ nhà tự trả (hao mòn) vẫn ẩn hoá đơn/chi phí như yêu cầu cũ.
   const hasTenantCharge = request.billingHint === 'tenant_charge_pending' && !!request.issuedInvoice;
-  const billingHintMeta = MAINTENANCE_BILLING_HINT_META.tenant_charge_pending;
+  // BE a5d7969: phiếu sửa xong luôn CLOSED, khoản thu sống ở hoá đơn — quá hạn thì đổi sang tông đỏ.
+  const chargeOverdue = request.tenantChargeStatus === 'overdue';
+  const billingHintMeta = chargeOverdue
+    ? { ...MAINTENANCE_BILLING_HINT_META.tenant_charge_pending, ...TENANT_CHARGE_STATUS_META.overdue,
+        detail: 'Hoá đơn sửa chữa đã quá hạn — vui lòng thanh toán ngay, quá hạn quản lý được quyền đề nghị chấm dứt hợp đồng.' }
+    : MAINTENANCE_BILLING_HINT_META.tenant_charge_pending;
+  const chargePaid = request.tenantChargeStatus === 'paid';
   const openPayModal = () => {
     if (!request.issuedInvoice) return;
     setPayBill(toMaintenanceSharedBill(request.issuedInvoice));
@@ -483,6 +489,21 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {chargePaid && (
+          <View style={styles.section}>
+            <View style={[styles.payCard, { backgroundColor: TENANT_CHARGE_STATUS_META.paid.bg, borderColor: TENANT_CHARGE_STATUS_META.paid.color + '40' }]}>
+              <IconText icon="success" style={[styles.payCardTitle, { color: TENANT_CHARGE_STATUS_META.paid.color }]}>
+                Đã thanh toán phí sửa chữa
+              </IconText>
+              {!!request.tenantChargePaidAt && (
+                <Text style={[styles.payCardDetail, { color: TENANT_CHARGE_STATUS_META.paid.color }]}>
+                  Thanh toán lúc {formatDateTime(request.tenantChargePaidAt)}
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Hoá đơn/chi phí sửa chữa CHỦ ĐỘNG ẨN với tenant (yêu cầu 02/09/2026) — đây là
             giấy tờ nội bộ giữa manager/host/admin (ảnh hoá đơn, mô tả sửa, số tiền chi
             trả), tenant không cần biết. Khoản tenant THỰC SỰ phải trả (billingHint =
@@ -581,7 +602,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Đã sửa/bàn giao xong, chờ khách thanh toán — trả xong BE tự đóng phiếu (21/09/2026) */}
+        {/* Legacy (trước 03/10/2026): phiếu WAITING_PAYMENT cũ — BE đã migrate sang CLOSED, giữ phòng hờ. */}
         {request.status === 'waiting_payment' && (
           <View style={styles.actionSection}>
             <View style={[styles.helpCard, { backgroundColor: '#FFFBEB' }]}>

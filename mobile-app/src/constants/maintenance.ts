@@ -108,6 +108,18 @@ export const MAINTENANCE_BILLING_HINT_META: Record<MaintenanceBillingHintKey, Bi
   none: { label: '', detail: '', color: '#6B7280', bg: '#F3F4F6' },
 };
 
+/**
+ * Trạng thái khoản thu khách của phiếu (BE a5d7969, 03/10/2026) — tính lúc đọc từ hoá đơn MAINTENANCE.
+ * Phiếu sửa xong luôn CLOSED; còn nợ hay đã trả xem field này, KHÔNG xem status nữa.
+ */
+export type TenantChargeStatusKey = 'none' | 'unpaid' | 'overdue' | 'paid';
+
+export const TENANT_CHARGE_STATUS_META: Record<Exclude<TenantChargeStatusKey, 'none'>, { label: string; color: string; bg: string }> = {
+  unpaid:  { label: 'Khách chưa trả', color: '#B45309', bg: '#FFFBEB' },
+  overdue: { label: 'Quá hạn thanh toán', color: '#B91C1C', bg: '#FEF2F2' },
+  paid:    { label: 'Đã thanh toán', color: '#15803D', bg: '#F0FDF4' },
+};
+
 /** Bước kế tiếp trong Luồng A (happy path). Luồng B rẽ nhánh — không đoán trước. */
 export const MAINTENANCE_NEXT_STATUS: Record<MaintenanceStatusKey, MaintenanceStatusKey | null> = {
   open:                   'in_repair',   // manager duyệt (hao mòn) — hoặc reject-fault sang Luồng B, hoặc repair_scheduled nếu đặt lịch sau
@@ -116,7 +128,7 @@ export const MAINTENANCE_NEXT_STATUS: Record<MaintenanceStatusKey, MaintenanceSt
   tenant_fault:            'closed',      // manager sửa hộ xong (complete — tự tạo charge)
   pending_tenant_repair:  'closed',      // verify-repair accepted — hoặc outstanding_damage nếu reject/quá hạn
   outstanding_damage:     null,
-  waiting_payment:         'closed',      // khách thanh toán hoá đơn bảo trì → BE tự đóng phiếu
+  waiting_payment:         'closed',      // legacy (trước 03/10/2026) — phiếu mới sửa xong là CLOSED luôn
   closed:                 null,
   cancelled:              null,
 };

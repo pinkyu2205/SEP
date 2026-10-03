@@ -16,6 +16,8 @@ export interface CheckoutChargeItem {
   /** ELECTRICITY | WATER | COMPENSATION | ... */
   type?: string;
   amount: number;
+  /** Hoá đơn MAINTENANCE: phiếu bảo trì sinh ra khoản phí sửa chữa (BE a5d7969). */
+  maintenanceRequestId?: number;
 }
 
 export interface CheckoutSettlement {
