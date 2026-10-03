@@ -43,7 +43,34 @@ export interface ParsedEvnInvoice {
    * giấy. Khi BE lưu được thì chỉ cần nối thêm phép so.
    */
   customerCode?: string;
+  /**
+   * Các TỔNG kWh in trên giấy mà khác số đang điền vào ô tiêu thụ.
+   *
+   * Tờ EVN in tổng ở hai chỗ: "Tổng: …" ngay dưới bảng chỉ số và "Tổng điện năng tiêu thụ"
+   * trong bảng tiền. Giấy thật thì hai chỗ bằng nhau; lệch nhau là giấy sửa tay hoặc OCR
+   * đọc sai một chỗ — phải nói cho admin biết chứ không lặng lẽ chọn một.
+   */
+  otherTotals?: string[];
 }
+
+/**
+ * Chữ cái OCR hay đọc nhầm từ chữ số: `PE0S150000114` thật ra là `PE05150000114` (giấy
+ * MTX#4/MTX#5 ngày 03/10/2026). Chỉ áp cho PHẦN SỐ của mã EVN — sau hai chữ cái đầu mã
+ * toàn là số, nên đổi ngược về số không làm mất thông tin gì.
+ */
+const DIGIT_LOOKALIKES: Record<string, string> = { o: '0', q: '0', i: '1', l: '1', z: '2', s: '5', b: '8' };
+
+/**
+ * Ghép mã EVN từ hai chữ cái đầu + phần số đã bóc. Phần số được phép lẫn TỐI ĐA 2 chữ cái
+ * nhìn giống số — nhiều hơn thì đó là một chữ thường, không phải mã đọc hỏng.
+ */
+const evnCode = (letters: string, tail: string): string | undefined => {
+  const t = tail.replace(/[\s.-]/g, '');
+  const lookalikes = t.replace(/\d/g, '').length;
+  if (lookalikes > 2) return undefined;
+  const code = (letters + t.replace(/[oqilzsb]/g, (c) => DIGIT_LOOKALIKES[c])).toUpperCase();
+  return /^[A-Z]{2}\d{9,14}$/.test(code) ? code : undefined;
+};
 
 // Dải dấu thanh/dấu phụ Unicode (U+0300–U+036F) mà NFD tách ra khỏi nguyên âm.
 // Viết bằng escape ASCII để dấu tổ hợp không nằm trần trong source.
@@ -84,14 +111,19 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
     Mẫu chữ: hai chữ cái rồi tới dãy số (`PE05000222239`). Cho phép có khoảng trắng hoặc
     gạch chen giữa vì OCR hay chèn — nhưng khi lưu thì bỏ hết, chỉ giữ phần chữ và số, để
     hai lần đọc cùng một tấm giấy luôn ra cùng một chuỗi.
+
+    Phần số chấp nhận cả chữ nhìn giống số (`0S` → `05`) — xem `evnCode`. Đọc theo bảng,
+    OCR hay tách nhãn "Mã khách hàng" ra một dòng và mã nằm cuối dòng địa chỉ, nên mẫu
+    tự do (không nhãn) mới là mẫu bắt được nhiều nhất.
   */
-  const codeMatch =
-    flat.match(/ma khach hang[^a-z0-9]*([a-z]{2}[\s.-]?[\d\s.-]{8,18})/)
-    || flat.match(/\b([a-z]{2}[\s.-]?\d{9,14})\b/);
-  if (codeMatch) {
-    const code = codeMatch[1].replace(/[^a-z0-9]/g, '').toUpperCase();
-    // Phải có cả chữ lẫn số, và đủ dài — chặn "tp" / "vn" dính vào một con số bên cạnh.
-    if (/^[A-Z]{2}\d{9,14}$/.test(code)) out.customerCode = code;
+  const labeled = flat.match(/ma khach hang[^a-z0-9]*([a-z]{2})[\s.-]?([0-9oqilzsb][0-9oqilzsb\s.-]{8,18})/);
+  out.customerCode = labeled ? evnCode(labeled[1], labeled[2].trim()) : undefined;
+  if (!out.customerCode) {
+    for (const m of flat.matchAll(/\b([a-z]{2})[\s.-]?([0-9oqilzsb]{9,14})\b/g)) {
+      // Phải có cả chữ lẫn số, và đủ dài — chặn "tp" / "vn" dính vào một con số bên cạnh.
+      const code = evnCode(m[1], m[2]);
+      if (code) { out.customerCode = code; break; }
+    }
   }
 
   // ── Tổng tiền: ưu tiên dòng "tổng cộng tiền thanh toán" / "total payment" ──
@@ -126,16 +158,20 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
     không bắt được chúng — sau chữ "kwh" là dấu ")" chứ không phải chữ số, nên regex trượt
     và ô tổng kWh bỏ trống trên đúng những hoá đơn có đầy đủ phần tổng kết.
   */
-  const kwh =
-    noDates.match(/tong dien nang tieu thu[^\d]*([\d.,]+)/) ||
-    noDates.match(/tong\s*:\s*([\d.,]+)/) ||
-    noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/) ||
-    noDates.match(/([\d.,]+)\s*kwh/) ||
-    noDates.match(/tieu thu[^\d]*?([\d.,]+)/);
-  if (kwh) {
-    const n = Number(onlyDigits(kwh[1]));
-    if (n > 0 && n <= MAX_PLAUSIBLE_KWH) out.totalKwh = String(n);
-  }
+  const plausibleKwh = (m: RegExpMatchArray | null): number | undefined => {
+    const n = m ? Number(onlyDigits(m[1])) : NaN;
+    return n > 0 && n <= MAX_PLAUSIBLE_KWH ? n : undefined;
+  };
+  // Hai chỗ in TỔNG trên tờ EVN — giữ cả hai để đối chiếu, xem `otherTotals`.
+  const printedTotals = [
+    plausibleKwh(noDates.match(/tong dien nang tieu thu[^\d]*([\d.,]+)/)),
+    plausibleKwh(noDates.match(/tong\s*:\s*([\d.,]+)/)),
+  ].filter((n): n is number => n != null);
+  const firstKwh = printedTotals[0]
+    ?? plausibleKwh(noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/))
+    ?? plausibleKwh(noDates.match(/([\d.,]+)\s*kwh/))
+    ?? plausibleKwh(noDates.match(/tieu thu[^\d]*?([\d.,]+)/));
+  if (firstKwh != null) out.totalKwh = String(firstKwh);
 
   /**
    * Chỉ số công tơ + kiểm chéo tổng kWh.
@@ -151,17 +187,31 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
 
     Hai nguồn độc lập nhau: một bên là con số EVN in ở dòng tổng, một bên là hiệu của hai
     chỉ số trong bảng. Bắt chúng khớp nhau thì kết quả chỉ sai khi CẢ HAI cùng sai theo
-    đúng một kiểu — gần như không xảy ra. Lệch nhau thì bỏ trống hai ô chỉ số, để người
-    nhập tay, chứ không đoán.
+    đúng một kiểu — gần như không xảy ra.
+
+    Lệch với MỌI tổng in trên giấy thì còn một đường lui: bộ ba nằm trọn trên MỘT dòng —
+    OCR đọc theo bảng giữ nguyên hàng `Toàn thời gian · 11.372 · 10.018 · 1.354`, ba số
+    cạnh nhau tự khớp phép trừ là chính hàng chỉ số. Ngoài hai đường đó thì bỏ trống hai ô
+    chỉ số cho người nhập tay, chứ không đoán.
   */
-  const labelKwh = out.totalKwh ? Number(out.totalKwh) : undefined;
-  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH, labelKwh);
+  const raw = ocr.rawText || '';
+  const expected = printedTotals.length ? printedTotals : out.totalKwh ? [Number(out.totalKwh)] : undefined;
+  let triple = findReadingTriple(raw, MAX_PLAUSIBLE_KWH, expected);
+  if (!triple && expected) {
+    for (const line of raw.split(/\r?\n/)) {
+      triple = findReadingTriple(line, MAX_PLAUSIBLE_KWH);
+      if (triple) break;
+    }
+  }
   if (triple) {
     out.prevReading = String(triple.prevReading);
     out.newReading = String(triple.newReading);
     // Bộ ba đã tự chứng minh bằng phép trừ → tin nó hơn số dò theo nhãn.
     out.totalKwh = String(triple.consumption);
   }
+
+  const others = [...new Set(printedTotals)].filter((n) => String(n) !== out.totalKwh);
+  if (out.totalKwh && others.length) out.otherTotals = others.map(String);
 
   return out;
 };

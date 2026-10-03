@@ -144,13 +144,21 @@ export const findReadingTriple = (
    * Phép trừ một mình vẫn để lọt bộ ba tình cờ — dãy cột biểu đồ cho `354 − 327 = 27` và
    * cả ba số đều có thật trong văn bản. Đối chiếu với tổng thì chúng rụng hết.
    *
+   * Nhận cả MẢNG: một tờ EVN in tổng ở hai chỗ ("Tổng: …" dưới bảng chỉ số và "Tổng điện
+   * năng tiêu thụ" ở bảng tiền), và hai chỗ đó có thể lệch nhau — bộ ba khớp chỗ nào cũng được.
+   *
    * Bỏ trống khi hoá đơn không in tổng ở đâu cả; khi đó hàm quay về chấm điểm như cũ.
    */
-  expectedConsumption?: number,
+  expectedConsumption?: number | readonly number[],
 ): ReadingTriple | null => {
   const flat = normalizeForParse((rawText || '').replace(/\s+/g, ' '));
   const tokens = tokenize(flat);
   if (tokens.length < 3) return null;
+
+  const expected = (Array.isArray(expectedConsumption)
+    ? expectedConsumption
+    : expectedConsumption != null ? [expectedConsumption as number] : []
+  ).filter((n) => Number.isFinite(n) && n > 0);
 
   const labelPositions = READING_LABELS
     .map((l) => flat.indexOf(l))
@@ -170,22 +178,25 @@ export const findReadingTriple = (
       const lo = tokens[j];
       const diff = hi.value - lo.value;
       if (diff <= 0 || diff > maxConsumption) continue;
-      if (expectedConsumption != null && diff !== expectedConsumption) continue;
+      if (expected.length > 0 && !expected.includes(diff)) continue;
 
       /**
-       * TIÊU THỤ PHẢI NHỎ HƠN CHỈ SỐ CŨ.
+       * TIÊU THỤ THƯỜNG NHỎ HƠN CHỈ SỐ CŨ — dùng để phân vai khi KHÔNG có tổng để so.
        *
        * Phép trừ một mình KHÔNG đủ để phân vai: với ba số 11.195 · 10.868 · 327 thì cả hai
        * cách đọc đều đúng số học —
        *     11.195 − 10.868 = 327   (đúng: tiêu thụ 327 kWh)
        *     11.195 − 327 = 10.868   (sai: tiêu thụ 10.868 kWh)
-       * Bản trước chỉ dựa vào điểm "gần nhãn" để tách hai cách này, nên hoá đơn nào OCR đọc
-       * hụt tên cột là lật ngay sang cách sai.
+       * Công tơ cộng dồn từ lúc lắp, còn tiêu thụ chỉ là phần của MỘT kỳ, nên cách đọc sai
+       * thường tự lộ vì 10.868 > 327.
        *
-       * Ràng buộc vật lý gỡ được nút đó: công tơ cộng dồn từ lúc lắp, còn tiêu thụ chỉ là
-       * phần của MỘT kỳ. Phần luôn nhỏ hơn tổng. Cách đọc sai tự loại vì 10.868 > 327.
+       * Nhưng KHÔNG được loại hẳn: công tơ mới lắp chạy chưa lâu thì tiêu thụ một kỳ lớn hơn
+       * chỉ số cũ là chuyện thật — giấy MTX#3 ngày 03/10/2026 in `772 · 140 · 632`, luật cũ
+       * gạch bộ ba đúng duy nhất và bỏ trống hai ô chỉ số. Có tổng in trên giấy thì tổng đã
+       * phân vai xong (`772 − 632 = 140` không khớp tổng nên rụng), nên luật này chỉ áp khi
+       * KHÔNG có tổng — lúc đó `772 · 140 · 632` thật sự mơ hồ, thà bỏ trống còn hơn đoán.
        */
-      if (diff >= lo.value) continue;
+      if (expected.length === 0 && diff >= lo.value) continue;
 
       /**
        * Chỉ số công tơ không bao giờ là số một hai chữ số trên hoá đơn thật.

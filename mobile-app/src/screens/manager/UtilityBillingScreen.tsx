@@ -66,6 +66,45 @@ type PrevReadingSource = 'last_invoice' | 'handover';
 const prevSourceLabel = (source?: PrevReadingSource) =>
   source === 'last_invoice' ? 'chốt kỳ trước' : 'lúc đón khách';
 
+/** Chỉ số mới của hoá đơn gần nhất một phòng, kèm lúc phát hành để biết thuộc khách nào. */
+interface LastInvoiceReading {
+  reading: number;
+  issuedAt: string | null;
+}
+
+/**
+ * CHỈ SỐ CŨ của một phòng ở kỳ đang chốt — chung cho tab Điện và tab Nước.
+ *
+ * Thứ tự tin cậy:
+ *   1. Phòng ĐÃ CHỐT kỳ này → đúng số đã lưu cùng bản chốt (đó là số sẽ lên hoá đơn).
+ *   2. Máy chủ tìm được số kỳ trước (`LAST_INVOICE` / `LAST_READING`) → dùng số đó.
+ *   3. Máy chủ rơi về mốc đón khách (`HANDOVER`) mà phòng CÓ hoá đơn sau ngày khách vào →
+ *      lấy chỉ số mới của hoá đơn đó. Máy chủ chỉ tra ĐÚNG tháng liền trước kỳ đang chốt;
+ *      nước chốt theo tháng chụp nên tháng liền trước thường trống (hoá đơn nước gần nhất là
+ *      kỳ 8 mà đang chốt tháng 10) → nó trả mốc đón khách, khách bị tính lại toàn bộ phần đã
+ *      trả từ ngày vào ở. Gặp 03/10/2026: MTX#4 P101 hiện 13 thay vì 52.
+ *   4. Không có gì → mốc đón khách trên hợp đồng (kỳ đầu thật sự).
+ *
+ * Hoá đơn phát hành TRƯỚC ngày khách hiện tại vào là của khách cũ — không lấy, vì kỳ đầu
+ * của khách mới phải tính từ số lúc bàn giao cho chính họ.
+ */
+const pickPrev = (
+  saved: SavedMeterReading | undefined,
+  last: LastInvoiceReading | undefined,
+  handover: number,
+  contractStart?: string,
+): { prevReading: number; prevSource: PrevReadingSource } => {
+  if (saved?.newReading != null && saved.prevReading != null) {
+    return { prevReading: saved.prevReading, prevSource: saved.prevSource === 'HANDOVER' ? 'handover' : 'last_invoice' };
+  }
+  if (saved?.prevReading != null && saved.prevSource && saved.prevSource !== 'HANDOVER') {
+    return { prevReading: saved.prevReading, prevSource: 'last_invoice' };
+  }
+  const ownInvoice = last && (!contractStart || !last.issuedAt || last.issuedAt.slice(0, 10) >= contractStart);
+  if (ownInvoice) return { prevReading: last!.reading, prevSource: 'last_invoice' };
+  return { prevReading: saved?.prevReading ?? handover, prevSource: 'handover' };
+};
+
 interface RoomMeterReading {
   roomId: string;
   roomCode: string;
@@ -727,7 +766,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     type: 'ELECTRICITY' | 'WATER',
     period?: string,
   ): Promise<{
-    lastReadings: Map<string, number>;
+    /** Chỉ số MỚI của hoá đơn gần nhất từng phòng (mọi kỳ) + lúc phát hành — xem `pickPrev`. */
+    lastReadings: Map<string, LastInvoiceReading>;
     sentKeys: Set<string>;
     houseSent: boolean;
     /** Tổng tiêu thụ CÁC PHÒNG đã phát hành trong kỳ — nền để tính hạn mức còn lại. */
@@ -749,7 +789,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
      */
     issued: Map<string, UtilityInvoiceLite>;
   }> => {
-    const lastReadings = new Map<string, number>();
+    const lastReadings = new Map<string, LastInvoiceReading>();
     const sentKeys = new Set<string>();
     const delivery = new Map<string, DeliveryState>();
     const issued = new Map<string, UtilityInvoiceLite>();
@@ -763,25 +803,45 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       // câu BE hỏi thì câu trả lời không thể lệch. Trước đây FE lấy hết mọi kỳ rồi tự so
       // chuỗi `billingPeriod`, mà chuỗi đó do admin gõ tay nên chỉ cần lệch một khoảng
       // trắng là dò trượt: nút vẫn xanh, bấm vào mới nhận "đã nhận hoá đơn của kỳ ...".
-      const invoices = await realManagerInvoiceService.listUtilityInvoices(
-        Number(propId), { type, period: period?.trim() || undefined },
-      );
+      const wantedRaw = period?.trim() || undefined;
+      const [invoices, history] = await Promise.all([
+        realManagerInvoiceService.listUtilityInvoices(Number(propId), { type, period: wantedRaw }),
+        /*
+          Chỉ số cũ phải lấy từ hoá đơn GẦN NHẤT của phòng, KHÔNG được lọc theo kỳ đang
+          chốt: kỳ này phòng chưa có hoá đơn (đang chốt chính là để làm ra nó). Bản trước lấy
+          `lastReadings` từ danh sách đã lọc kỳ, nên phòng chưa nhận hoá đơn kỳ này không có
+          số kỳ trước và rơi về mốc đón khách. Lỗi không kéo theo cả màn: hỏng thì dùng tạm
+          danh sách đã lọc như cũ.
+        */
+        wantedRaw
+          ? realManagerInvoiceService.listUtilityInvoices(Number(propId), { type }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
       // Mới nhất trước, để phần tử đầu tiên của mỗi phòng là kỳ gần nhất.
-      const sorted = [...invoices].sort((a, b) => {
+      const newestFirst = (rows: UtilityInvoiceLite[]) => [...rows].sort((a, b) => {
         const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
         const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
         return tb - ta || (b.id ?? 0) - (a.id ?? 0);
       });
-      for (const inv of sorted) {
+      const keyOf = (inv: UtilityInvoiceLite) =>
         // Nhà nguyên căn không có roomId → khớp theo phần tử phòng duy nhất của nhà đó.
-        const isHouse = inv.roomId == null;
-        const key = isHouse ? `house-${propId}-unit` : String(inv.roomId);
-        if (inv.newReading != null && !lastReadings.has(key)) {
-          lastReadings.set(key, Number(inv.newReading));
+        inv.roomId == null ? `house-${propId}-unit` : String(inv.roomId);
+      const isCancelled = (inv: UtilityInvoiceLite) => (inv.status || '').toUpperCase() === 'CANCELLED';
+
+      for (const inv of newestFirst(history ?? invoices)) {
+        // Hoá đơn đã huỷ thì số trên đó không còn là căn cứ — lấy bản trước nó.
+        if (isCancelled(inv) || inv.newReading == null) continue;
+        const key = keyOf(inv);
+        if (!lastReadings.has(key)) {
+          lastReadings.set(key, { reading: Number(inv.newReading), issuedAt: inv.createdAt ?? null });
         }
+      }
+
+      for (const inv of newestFirst(invoices)) {
+        const isHouse = inv.roomId == null;
+        const key = keyOf(inv);
         // Hoá đơn đã huỷ không tính là "đã gửi" — huỷ xong phải gửi lại được.
-        const cancelled = (inv.status || '').toUpperCase() === 'CANCELLED';
-        if (cancelled) continue;
+        if (isCancelled(inv)) continue;
         /*
           BE đã lọc theo `period` rồi nên mọi dòng về đây đều thuộc kỳ đang chốt. Chỉ so
           lại khi BE trả kèm chuỗi kỳ khác hẳn (phòng hờ BE bỏ qua tham số lọc).
@@ -944,17 +1004,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     if (prop) {
       setRoomElecReadings(inPeriod.map(r => {
         const saved = savedByRoom.get(r.id);
-        /*
-          Ba nguồn chỉ số cũ, xếp theo độ tin cậy giảm dần:
-            1. bản CHỐT của chính kỳ này (quản lý đã đi chụp rồi, kể cả từ lần mở app trước)
-            2. chỉ số mới của hoá đơn kỳ liền trước
-            3. mốc ghi lúc đón khách (kỳ đầu tiên của hợp đồng)
-        */
-        const prevReading = saved?.prevReading ?? lastReadings.get(r.id) ?? r.prevElec;
-        const prevSource: PrevReadingSource =
-          saved?.prevSource === 'HANDOVER' ? 'handover'
-            : saved ? 'last_invoice'
-              : lastReadings.has(r.id) ? 'last_invoice' : 'handover';
+        const { prevReading, prevSource } = pickPrev(saved, lastReadings.get(r.id), r.prevElec, r.contractStart);
         return {
           roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
           prevReading,
@@ -1365,11 +1415,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     if (prop) {
       setRoomWaterReadings(prop.rooms.map(r => {
         const saved = savedByRoom.get(r.id);
-        const prevReading = saved?.prevReading ?? lastReadings.get(r.id) ?? r.prevWater;
-        const prevSource: PrevReadingSource =
-          saved?.prevSource === 'HANDOVER' ? 'handover'
-            : saved ? 'last_invoice'
-              : lastReadings.has(r.id) ? 'last_invoice' : 'handover';
+        const { prevReading, prevSource } = pickPrev(saved, lastReadings.get(r.id), r.prevWater, r.contractStart);
         return {
           roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
           prevReading,

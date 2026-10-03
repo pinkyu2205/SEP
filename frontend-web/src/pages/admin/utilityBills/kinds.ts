@@ -57,6 +57,8 @@ export interface BillReadout {
   period: string;
   prev: string;
   next: string;
+  /** Tổng tiêu thụ in ở chỗ KHÁC trên giấy mà không bằng `qty` — giấy tự mâu thuẫn. */
+  otherTotals: string[];
 }
 
 export interface PublishInput {
@@ -114,7 +116,8 @@ export interface KindConfig {
   unitPrice: (amount: number, qty: number) => number;
   read: (imageUrl: string) => Promise<BillReadout>;
   list: (params: { propertyId?: number; month?: number; year?: number }) => Promise<PublishedBill[]>;
-  publish: (input: PublishInput) => Promise<PublishedBill>;
+  /** `silent`: không bật toast lỗi chung — màn gọi tự hiện lỗi ở đúng chỗ (nhập lô). */
+  publish: (input: PublishInput, opts?: { silent?: boolean }) => Promise<PublishedBill>;
   revoke: (id: number) => Promise<void>;
 }
 
@@ -198,11 +201,12 @@ export const KINDS: Record<UtilityKind, KindConfig> = {
         period: p.billingPeriod || serverPeriod(ocr?.billingPeriod),
         prev: p.prevReading ?? '',
         next: p.newReading ?? '',
+        otherTotals: p.otherTotals ?? [],
       };
     },
     list: async (params) => (await evnBillService.list(params)).map(fromEvn),
-    publish: async ({ qty, amount, ...rest }) =>
-      fromEvn(await evnBillService.publish({ ...rest, totalKwh: qty, totalAmount: amount })),
+    publish: async ({ qty, amount, ...rest }, opts) =>
+      fromEvn(await evnBillService.publish({ ...rest, totalKwh: qty, totalAmount: amount }, opts)),
     revoke: (id) => evnBillService.revoke(id),
   },
   WATER: {
@@ -244,11 +248,12 @@ export const KINDS: Record<UtilityKind, KindConfig> = {
         period: p.billingPeriod || serverPeriod(ocr?.billingPeriod),
         prev: reading(p.prevReading),
         next: reading(p.newReading),
+        otherTotals: [],
       };
     },
     list: async (params) => (await waterBillService.list(params)).map(fromWater),
-    publish: async ({ qty, amount, ...rest }) =>
-      fromWater(await waterBillService.create({ ...rest, totalQuantity: qty, totalAmount: amount })),
+    publish: async ({ qty, amount, ...rest }, opts) =>
+      fromWater(await waterBillService.create({ ...rest, totalQuantity: qty, totalAmount: amount }, opts)),
     revoke: (id) => waterBillService.revoke(id),
   },
 };
